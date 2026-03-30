@@ -5,12 +5,14 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:installed_apps/app_info.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:on_audio_query/on_audio_query.dart';
+import 'package:datatransfer/core/models/file_item.dart';
 import '../../providers/device_files_provider.dart';
+import '../../providers/selected_files_provider.dart';
 import 'dart:typed_data';
 
 class FileListTab extends ConsumerWidget {
   final String type;
-  final VoidCallback onToggleSelection;
+  final Function(FileItem) onToggleSelection;
   final bool isGrid;
 
   const FileListTab({
@@ -24,15 +26,15 @@ class FileListTab extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     switch (type) {
       case 'Apps':
-        return _buildAsyncData(ref.watch(appsProvider), (data) => _buildAppsList(context, data));
+        return _buildAsyncData(ref.watch(appsProvider), (data) => _buildAppsList(context, ref, data));
       case 'Photos':
-        return _buildAsyncData(ref.watch(photosProvider), (data) => _buildMediaGrid(context, data));
+        return _buildAsyncData(ref.watch(photosProvider), (data) => _buildMediaGrid(context, ref, data));
       case 'Videos':
-        return _buildAsyncData(ref.watch(videosProvider), (data) => _buildMediaGrid(context, data));
+        return _buildAsyncData(ref.watch(videosProvider), (data) => _buildMediaGrid(context, ref, data));
       case 'Music':
-        return _buildAsyncData(ref.watch(audioProvider), (data) => _buildAudioList(context, data));
+        return _buildAsyncData(ref.watch(audioProvider), (data) => _buildAudioList(context, ref, data));
       case 'Files':
-        return _buildAsyncData(ref.watch(myFilesProvider), (data) => _buildFilesList(context, data));
+        return _buildAsyncData(ref.watch(myFilesProvider), (data) => _buildFilesList(context, ref, data));
       case 'History':
       default:
         return const Center(child: Text('History implementation coming soon'));
@@ -52,12 +54,21 @@ class FileListTab extends ConsumerWidget {
     );
   }
 
-  Widget _buildAppsList(BuildContext context, List<AppInfo> apps) {
+  Widget _buildAppsList(BuildContext context, WidgetRef ref, List<AppInfo> apps) {
+    final selectedFiles = ref.watch(selectedFilesProvider);
     return ListView.builder(
       padding: EdgeInsets.only(bottom: 100.h),
       itemCount: apps.length,
       itemBuilder: (context, index) {
         final app = apps[index];
+        final fileItem = FileItem(
+          id: app.packageName,
+          name: app.name,
+          sizeMB: 0, // AppInfo doesn't provide size directly
+          type: 'App',
+        );
+        final isSelected = selectedFiles.any((item) => item.id == fileItem.id);
+
         return ListTile(
           leading: app.icon != null 
               ? Image.memory(app.icon!, width: 45.w, height: 45.w) 
@@ -65,16 +76,20 @@ class FileListTab extends ConsumerWidget {
           title: Text(app.name, style: TextStyle(fontSize: 16.sp, fontWeight: FontWeight.w500)),
           subtitle: Text(app.versionName, style: TextStyle(fontSize: 12.sp, color: Colors.grey)),
           trailing: IconButton(
-            icon: Icon(Icons.radio_button_unchecked, color: Colors.grey.shade400),
-            onPressed: onToggleSelection,
+            icon: Icon(
+              isSelected ? Icons.check_circle : Icons.radio_button_unchecked,
+              color: isSelected ? Theme.of(context).primaryColor : Colors.grey.shade400,
+            ),
+            onPressed: () => onToggleSelection(fileItem),
           ),
-          onTap: onToggleSelection,
+          onTap: () => onToggleSelection(fileItem),
         );
       },
     );
   }
 
-  Widget _buildMediaGrid(BuildContext context, List<AssetEntity> mediaItems) {
+  Widget _buildMediaGrid(BuildContext context, WidgetRef ref, List<AssetEntity> mediaItems) {
+    final selectedFiles = ref.watch(selectedFilesProvider);
     return GridView.builder(
       padding: EdgeInsets.only(left: 10.w, right: 10.w, top: 10.h, bottom: 100.h),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
@@ -85,12 +100,21 @@ class FileListTab extends ConsumerWidget {
       itemCount: mediaItems.length,
       itemBuilder: (context, index) {
         final entity = mediaItems[index];
+        final fileItem = FileItem(
+          id: entity.id,
+          name: entity.title ?? 'Media ${entity.id}',
+          sizeMB: 0, // AssetEntity size is async
+          type: type == 'Photos' ? 'Photo' : 'Video',
+        );
+        final isSelected = selectedFiles.any((item) => item.id == fileItem.id);
+
         return GestureDetector(
-          onTap: onToggleSelection,
+          onTap: () => onToggleSelection(fileItem),
           child: Container(
             decoration: BoxDecoration(
               color: Theme.of(context).primaryColor.withOpacity(0.1),
               borderRadius: BorderRadius.circular(12.r),
+              border: isSelected ? Border.all(color: Theme.of(context).primaryColor, width: 2) : null,
             ),
             child: Stack(
               fit: StackFit.expand,
@@ -114,7 +138,11 @@ class FileListTab extends ConsumerWidget {
                 Positioned(
                   top: 5.h,
                   right: 5.w,
-                  child: Icon(Icons.radio_button_unchecked, color: Colors.white, size: 20.sp),
+                  child: Icon(
+                    isSelected ? Icons.check_circle : Icons.radio_button_unchecked,
+                    color: isSelected ? Theme.of(context).primaryColor : Colors.white,
+                    size: 20.sp,
+                  ),
                 ),
               ],
             ),
@@ -124,12 +152,21 @@ class FileListTab extends ConsumerWidget {
     );
   }
 
-  Widget _buildAudioList(BuildContext context, List<SongModel> songs) {
+  Widget _buildAudioList(BuildContext context, WidgetRef ref, List<SongModel> songs) {
+    final selectedFiles = ref.watch(selectedFilesProvider);
     return ListView.builder(
       padding: EdgeInsets.only(bottom: 100.h),
       itemCount: songs.length,
       itemBuilder: (context, index) {
         final song = songs[index];
+        final fileItem = FileItem(
+          id: song.id.toString(),
+          name: song.title,
+          sizeMB: (song.size / (1024 * 1024)).toDouble(),
+          type: 'Music',
+        );
+        final isSelected = selectedFiles.any((item) => item.id == fileItem.id);
+
         return ListTile(
           leading: QueryArtworkWidget(
             id: song.id,
@@ -139,24 +176,37 @@ class FileListTab extends ConsumerWidget {
           title: Text(song.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 16.sp, fontWeight: FontWeight.w500)),
           subtitle: Text(song.artist ?? 'Unknown Artist', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12.sp, color: Colors.grey)),
           trailing: IconButton(
-            icon: Icon(Icons.radio_button_unchecked, color: Colors.grey.shade400),
-            onPressed: onToggleSelection,
+            icon: Icon(
+              isSelected ? Icons.check_circle : Icons.radio_button_unchecked,
+              color: isSelected ? Theme.of(context).primaryColor : Colors.grey.shade400,
+            ),
+            onPressed: () => onToggleSelection(fileItem),
           ),
-          onTap: onToggleSelection,
+          onTap: () => onToggleSelection(fileItem),
         );
       },
     );
   }
 
-  Widget _buildFilesList(BuildContext context, List<File> files) {
+  Widget _buildFilesList(BuildContext context, WidgetRef ref, List<File> files) {
+    final selectedFiles = ref.watch(selectedFilesProvider);
     return ListView.builder(
       padding: EdgeInsets.only(bottom: 100.h),
       itemCount: files.length,
       itemBuilder: (context, index) {
         final file = files[index];
+        final name = file.path.split('/').last;
+        final fileItem = FileItem(
+          id: file.path,
+          name: name,
+          sizeMB: 0, // Will be updated async in subtitle but we use 0 for item id consistency
+          type: 'File',
+        );
+        final isSelected = selectedFiles.any((item) => item.id == fileItem.id);
+
         return ListTile(
           leading: Icon(Icons.insert_drive_file, size: 45.w, color: Theme.of(context).primaryColor),
-          title: Text(file.path.split('/').last, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 16.sp, fontWeight: FontWeight.w500)),
+          title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 16.sp, fontWeight: FontWeight.w500)),
           subtitle: FutureBuilder<int>(
             future: file.length(),
             builder: (context, snapshot) {
@@ -168,10 +218,13 @@ class FileListTab extends ConsumerWidget {
             },
           ),
           trailing: IconButton(
-            icon: Icon(Icons.radio_button_unchecked, color: Colors.grey.shade400),
-            onPressed: onToggleSelection,
+            icon: Icon(
+              isSelected ? Icons.check_circle : Icons.radio_button_unchecked,
+              color: isSelected ? Theme.of(context).primaryColor : Colors.grey.shade400,
+            ),
+            onPressed: () => onToggleSelection(fileItem),
           ),
-          onTap: onToggleSelection,
+          onTap: () => onToggleSelection(fileItem),
         );
       },
     );

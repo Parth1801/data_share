@@ -1,4 +1,5 @@
 import 'package:datatransfer/features/file_selection/providers/selected_files_provider.dart';
+import 'package:datatransfer/core/models/file_item.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
@@ -29,8 +30,8 @@ class _FileSelectionScreenState extends ConsumerState<FileSelectionScreen>
     super.dispose();
   }
 
-  void _toggleFileSelection() {
-    // This will be replaced by actual file selection logic using selectedFilesProvider
+  void _toggleFileSelection(FileItem file) {
+    ref.read(selectedFilesProvider.notifier).toggleFile(file);
   }
 
   @override
