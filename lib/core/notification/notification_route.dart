@@ -7,7 +7,6 @@ abstract class NotificationRouter {
   Future<void> handle(Map<String, dynamic> data);
 }
 
-
 /*
 how to use 
 

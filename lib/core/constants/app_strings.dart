@@ -1,6 +1,6 @@
 class AppStrings {
-  static const appName = 'Task Reminder';
-  static const appTagline = 'Organize your life';
+  static const appName = 'Data Transfer';
+  static const appTagline = 'Transfer your data easily';
   static const databaseUrl =
       'https://todoappriverpod-ecb1e-default-rtdb.asia-southeast1.firebasedatabase.app';
 }

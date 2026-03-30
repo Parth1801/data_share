@@ -2,7 +2,7 @@ name: datatransfer
 description: "A new Flutter project."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
-publish_to: 'none' # Remove this line if you wish to publish to pub.dev
+publish_to: "none" # Remove this line if you wish to publish to pub.dev
 
 # The following defines the version and build number for your application.
 # A version number is three numbers separated by dots, like 1.2.43
@@ -41,7 +41,8 @@ dependencies:
   google_fonts: ^8.0.2
   flutter_animate: ^4.5.2
   intl: ^0.20.2
-  flutter_riverpod: ^3.3.1
+  flutter_riverpod:
+    ^3.3.1
 
     #firebase packages you can comment if not needed
   firebase_core: ^4.5.0
@@ -52,8 +53,15 @@ dependencies:
   hive: ^2.2.3
   hive_flutter: ^1.1.0
 
-  #premission handler 
+  #premission handler
   permission_handler: ^12.0.1
+  file_picker: ^10.3.10
+  path_provider: ^2.1.5
+  device_info_plus: ^12.3.0
+  flutter_p2p_connection: any
+  installed_apps: ^2.1.1
+  photo_manager: ^3.9.0
+  on_audio_query: ^2.9.0
 
 dev_dependencies:
   flutter_test:
@@ -66,8 +74,6 @@ dev_dependencies:
 
 # The following section is specific to Flutter packages.
 flutter:
-
-
   uses-material-design: true
 
   # To add assets to your application, add an assets section, like this:
@@ -80,7 +86,6 @@ flutter:
 
   # For details regarding adding assets from package dependencies, see
   # https://flutter.dev/to/asset-from-package
-
 
   # fonts:
   #   - family: Schyler

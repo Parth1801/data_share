@@ -35,7 +35,8 @@ class SharedPrefsService {
   }
 
   // --- Notifications ---
-  bool get notificationsEnabled => _prefs.getBool('notificationsEnabled') ?? true;
+  bool get notificationsEnabled =>
+      _prefs.getBool('notificationsEnabled') ?? true;
   Future<void> setNotificationsEnabled(bool enabled) async {
     await _prefs.setBool('notificationsEnabled', enabled);
   }
@@ -45,6 +46,7 @@ class SharedPrefsService {
   Future<void> setUserToken(String token) async {
     await _prefs.setString('auth_token', token);
   }
+
   Future<void> clearUserToken() async {
     await _prefs.remove('auth_token');
   }

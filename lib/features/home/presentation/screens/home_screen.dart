@@ -1,4 +1,5 @@
 import 'package:datatransfer/features/file_selection/presentation/screens/file_selection_screen.dart';
+import 'package:datatransfer/features/transfer/presentation/screens/receive_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
@@ -106,14 +107,17 @@ class HomeScreen extends StatelessWidget {
             ],
           ),
           SizedBox(height: 15.h),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(10.r),
-            child: LinearProgressIndicator(
-              value: 0.5,
-              minHeight: 8.h,
-              backgroundColor: Colors.grey.withOpacity(0.2),
-              valueColor: AlwaysStoppedAnimation<Color>(
-                Theme.of(context).primaryColor,
+          SizedBox(
+            height: 8.h,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(10.r),
+              child: LinearProgressIndicator(
+                value: 0.5,
+                minHeight: 8.h,
+                backgroundColor: Colors.grey.withOpacity(0.2),
+                valueColor: AlwaysStoppedAnimation<Color>(
+                  Theme.of(context).primaryColor,
+                ),
               ),
             ),
           ),
@@ -151,6 +155,12 @@ class HomeScreen extends StatelessWidget {
             child: GestureDetector(
               onTap: () {
                 // Navigate to radar/receive screen later
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const ReceiveScreen(),
+                  ),
+                );
               },
               child: _buildActionButton(
                 context,

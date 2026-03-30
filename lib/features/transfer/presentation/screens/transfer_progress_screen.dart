@@ -54,7 +54,7 @@ class TransferProgressScreen extends StatelessWidget {
             color: Theme.of(context).primaryColor.withOpacity(0.3),
             blurRadius: 15,
             offset: const Offset(0, 10),
-          )
+          ),
         ],
       ),
       child: Column(
@@ -76,10 +76,7 @@ class TransferProgressScreen extends StatelessWidget {
                   SizedBox(height: 5.h),
                   Text(
                     '5 Files • 250 MB',
-                    style: TextStyle(
-                      color: Colors.white70,
-                      fontSize: 14.sp,
-                    ),
+                    style: TextStyle(color: Colors.white70, fontSize: 14.sp),
                   ),
                 ],
               ),
@@ -118,7 +115,11 @@ class TransferProgressScreen extends StatelessWidget {
               ),
               Text(
                 '40%',
-                style: TextStyle(color: Colors.white, fontSize: 12.sp, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 12.sp,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ],
           ),
@@ -127,7 +128,12 @@ class TransferProgressScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildFileTransferItem(BuildContext context, int index, double progress, bool isDark) {
+  Widget _buildFileTransferItem(
+    BuildContext context,
+    int index,
+    double progress,
+    bool isDark,
+  ) {
     bool isDone = progress == 1.0;
     bool isPending = progress == 0.0;
 
@@ -142,7 +148,7 @@ class TransferProgressScreen extends StatelessWidget {
             color: Colors.black.withOpacity(0.05),
             blurRadius: 10,
             offset: const Offset(0, 5),
-          )
+          ),
         ],
       ),
       child: Row(
@@ -179,9 +185,13 @@ class TransferProgressScreen extends StatelessWidget {
                     Expanded(
                       child: LinearProgressIndicator(
                         value: progress,
-                        backgroundColor: isDark ? Colors.grey[800] : Colors.grey[200],
+                        backgroundColor: isDark
+                            ? Colors.grey[800]
+                            : Colors.grey[200],
                         valueColor: AlwaysStoppedAnimation<Color>(
-                          isDone ? Colors.green : Theme.of(context).primaryColor,
+                          isDone
+                              ? Colors.green
+                              : Theme.of(context).primaryColor,
                         ),
                         minHeight: 4.h,
                         borderRadius: BorderRadius.circular(5.r),
@@ -189,7 +199,11 @@ class TransferProgressScreen extends StatelessWidget {
                     ),
                     SizedBox(width: 10.w),
                     Text(
-                      isDone ? 'Done' : (isPending ? 'Waiting' : '${(progress * 100).toInt()}%'),
+                      isDone
+                          ? 'Done'
+                          : (isPending
+                                ? 'Waiting'
+                                : '${(progress * 100).toInt()}%'),
                       style: TextStyle(
                         fontSize: 12.sp,
                         color: isDone ? Colors.green : Colors.grey,

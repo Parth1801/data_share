@@ -6,17 +6,11 @@ class ApiResponse<T> {
   final Map<String, dynamic>? rawData;
   final String? message;
 
-  ApiResponse.success(
-    this.data, {
-    this.rawData,
-    this.message,
-  })  : isSuccess = true,
-        error = null;
+  ApiResponse.success(this.data, {this.rawData, this.message})
+    : isSuccess = true,
+      error = null;
 
-  ApiResponse.error(
-    this.error, {
-    this.rawData,
-    this.message,
-  })  : isSuccess = false,
-        data = null;
+  ApiResponse.error(this.error, {this.rawData, this.message})
+    : isSuccess = false,
+      data = null;
 }

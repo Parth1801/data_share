@@ -63,14 +63,20 @@ class FormValidator {
     /// ---------------- SELECTION ----------------
     if (type == FieldType.selection) {
       if (mediumGroupValue == '' || roleGroupValue == '') {
-        return ValidationResult.invalid(value, error1 ?? ValidationStrings.selectionRequired);
+        return ValidationResult.invalid(
+          value,
+          error1 ?? ValidationStrings.selectionRequired,
+        );
       }
       return ValidationResult.valid(value);
     }
 
     /// ---------------- EMPTY ----------------
     if (value.isEmpty) {
-      return ValidationResult.invalid(value, error1 ?? ValidationStrings.requiredField);
+      return ValidationResult.invalid(
+        value,
+        error1 ?? ValidationStrings.requiredField,
+      );
     }
 
     /// ---------------- SPACE ----------------
@@ -85,29 +91,44 @@ class FormValidator {
     switch (type) {
       case FieldType.otp:
         if (value.length != 4) {
-          return ValidationResult.invalid(value, error2 ?? ValidationStrings.invalidOtp);
+          return ValidationResult.invalid(
+            value,
+            error2 ?? ValidationStrings.invalidOtp,
+          );
         }
         break;
 
       case FieldType.email:
         if (!value.contains('@')) {
-          return ValidationResult.invalid(value, error2 ?? ValidationStrings.invalidEmail);
+          return ValidationResult.invalid(
+            value,
+            error2 ?? ValidationStrings.invalidEmail,
+          );
         }
         if (!emailRegex.hasMatch(value)) {
-          return ValidationResult.invalid(value, error3 ?? ValidationStrings.invalidEmail);
+          return ValidationResult.invalid(
+            value,
+            error3 ?? ValidationStrings.invalidEmail,
+          );
         }
         break;
 
       case FieldType.pincode:
         if (value.length != 6) {
-          return ValidationResult.invalid(value, error2 ?? ValidationStrings.invalidPincode);
+          return ValidationResult.invalid(
+            value,
+            error2 ?? ValidationStrings.invalidPincode,
+          );
         }
         break;
 
       case FieldType.number:
         final parsed = double.tryParse(value);
         if (parsed == null || parsed <= 0) {
-          return ValidationResult.invalid(value, error1 ?? ValidationStrings.invalidNumber);
+          return ValidationResult.invalid(
+            value,
+            error1 ?? ValidationStrings.invalidNumber,
+          );
         }
         if (totalAmount != null && parsed > totalAmount) {
           return ValidationResult.invalid(
@@ -119,10 +140,16 @@ class FormValidator {
 
       case FieldType.password:
         if (value.contains(' ')) {
-          return ValidationResult.invalid(value, error2 ?? ValidationStrings.noSpacesAllowed);
+          return ValidationResult.invalid(
+            value,
+            error2 ?? ValidationStrings.noSpacesAllowed,
+          );
         }
         if (value.length < 8) {
-          return ValidationResult.invalid(value, error3 ?? ValidationStrings.min8Chars);
+          return ValidationResult.invalid(
+            value,
+            error3 ?? ValidationStrings.min8Chars,
+          );
         }
         if (value.length > 16) {
           return ValidationResult.invalid(

@@ -5,16 +5,16 @@
 // import 'package:todo_app_riverpod/view/auth/data/models/user_model.dart';
 
 // /// Example file showing how to call APIs using ApiClient
-// /// 
+// ///
 // /// This file contains commented examples for different types of API calls.
 // /// Uncomment and modify as needed when your APIs are ready.
 
 // class ApiCallExamples {
-  
+
 //   // ========================================
 //   // Example 1: Simple GET Request
 //   // ========================================
-  
+
 //   /*
 //   Future<void> fetchUserProfile(BuildContext context) async {
 //     final response = await ApiClient.get(
@@ -29,7 +29,7 @@
 //       // Access raw data
 //       final userData = response.rawData;
 //       print('User data: $userData');
-      
+
 //       // Access message
 //       print('Message: ${response.message}');
 //     } else {
@@ -42,7 +42,7 @@
 //   // ========================================
 //   // Example 2: GET with Query Parameters
 //   // ========================================
-  
+
 //   /*
 //   Future<void> searchUsers(BuildContext context, String query) async {
 //     final response = await ApiClient.get(
@@ -66,7 +66,7 @@
 //   // ========================================
 //   // Example 3: GET with Model Parsing
 //   // ========================================
-  
+
 //   /*
 //   Future<void> getUserWithModel(BuildContext context, String userId) async {
 //     final response = await ApiClient.get<AppUser>(
@@ -87,7 +87,7 @@
 //   // ========================================
 //   // Example 4: POST Request with JSON Body
 //   // ========================================
-  
+
 //   /*
 //   Future<void> createUser(BuildContext context) async {
 //     final response = await ApiClient.post(
@@ -112,7 +112,7 @@
 //   // ========================================
 //   // Example 5: POST with Model Parsing
 //   // ========================================
-  
+
 //   /*
 //   Future<void> loginUser(BuildContext context, String email, String password) async {
 //     final response = await ApiClient.post<AppUser>(
@@ -137,7 +137,7 @@
 //   // ========================================
 //   // Example 6: PUT Request to Update Data
 //   // ========================================
-  
+
 //   /*
 //   Future<void> updateUserProfile(
 //     BuildContext context,
@@ -164,7 +164,7 @@
 //   // ========================================
 //   // Example 7: DELETE Request
 //   // ========================================
-  
+
 //   /*
 //   Future<void> deleteUser(BuildContext context, String userId) async {
 //     final response = await ApiClient.delete(
@@ -182,7 +182,7 @@
 //   // ========================================
 //   // Example 8: Multipart File Upload
 //   // ========================================
-  
+
 //   /*
 //   Future<void> uploadProfileImage(
 //     BuildContext context,
@@ -213,7 +213,7 @@
 //   // ========================================
 //   // Example 9: Form Data (No Files)
 //   // ========================================
-  
+
 //   /*
 //   Future<void> submitFormData(BuildContext context) async {
 //     final response = await ApiClient.postFormData(
@@ -236,7 +236,7 @@
 //   // ========================================
 //   // Example 10: Silent API Call (No Loading/Dialog)
 //   // ========================================
-  
+
 //   /*
 //   Future<void> silentApiCall(BuildContext context) async {
 //     final response = await ApiClient.get(
@@ -260,7 +260,7 @@
 //   // ========================================
 //   // Example 11: With Callback After Dialog
 //   // ========================================
-  
+
 //   /*
 //   Future<void> apiWithCallback(BuildContext context) async {
 //     final response = await ApiClient.post(
@@ -284,7 +284,7 @@
 //   // ========================================
 //   // Example 12: Using withParams Helper
 //   // ========================================
-  
+
 //   /*
 //   Future<void> getFilteredData(BuildContext context) async {
 //     final url = ApiEndpoints.withParams(
@@ -312,7 +312,7 @@
 //   // ========================================
 //   // Example 13: Handling Token Management
 //   // ========================================
-  
+
 //   /*
 //   // After login, save token
 //   Future<void> saveTokenAfterLogin(String token) async {
@@ -329,7 +329,7 @@
 //   // ========================================
 //   // Example 14: Complete Login Flow
 //   // ========================================
-  
+
 //   /*
 //   Future<void> completeLoginFlow(
 //     BuildContext context,
@@ -344,7 +344,7 @@
 //         // Save token from response
 //         final token = json['token'] as String;
 //         SharedPrefsService().setUserToken(token);
-        
+
 //         // Parse user model
 //         return AppUser.fromJson(json['user']);
 //       },

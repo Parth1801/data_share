@@ -1,17 +1,19 @@
+import 'package:datatransfer/features/transfer/providers/discovery_provider.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'transfer_progress_screen.dart';
 
-class RadarScanScreen extends StatefulWidget {
+class RadarScanScreen extends ConsumerStatefulWidget {
   const RadarScanScreen({super.key});
 
   @override
-  State<RadarScanScreen> createState() => _RadarScanScreenState();
+  ConsumerState<RadarScanScreen> createState() => _RadarScanScreenState();
 }
 
-class _RadarScanScreenState extends State<RadarScanScreen> with SingleTickerProviderStateMixin {
+class _RadarScanScreenState extends ConsumerState<RadarScanScreen>
+    with SingleTickerProviderStateMixin {
   late AnimationController _controller;
-  bool _foundDevice = false;
 
   @override
   void initState() {
@@ -20,15 +22,6 @@ class _RadarScanScreenState extends State<RadarScanScreen> with SingleTickerProv
       vsync: this,
       duration: const Duration(seconds: 4),
     )..repeat();
-
-    // Mock finding a device after 3 seconds
-    Future.delayed(const Duration(seconds: 3), () {
-      if (mounted) {
-        setState(() {
-          _foundDevice = true;
-        });
-      }
-    });
   }
 
   @override
@@ -40,6 +33,7 @@ class _RadarScanScreenState extends State<RadarScanScreen> with SingleTickerProv
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final discoveredDevices = ref.watch(discoveryProvider);
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
@@ -62,7 +56,7 @@ class _RadarScanScreenState extends State<RadarScanScreen> with SingleTickerProv
                   _buildRadarCircle(300.w, 0.1),
                   _buildRadarCircle(200.w, 0.2),
                   _buildRadarCircle(100.w, 0.3),
-                  
+
                   // Radar Sweep Animation
                   RotationTransition(
                     turns: _controller,
@@ -82,7 +76,7 @@ class _RadarScanScreenState extends State<RadarScanScreen> with SingleTickerProv
                       ),
                     ),
                   ),
-                  
+
                   // Center Icon (Sender)
                   Container(
                     width: 60.w,
@@ -95,23 +89,51 @@ class _RadarScanScreenState extends State<RadarScanScreen> with SingleTickerProv
                           color: theme.primaryColor.withOpacity(0.4),
                           blurRadius: 15,
                           spreadRadius: 5,
-                        )
+                        ),
                       ],
                     ),
-                    child: const Icon(Icons.person, color: Colors.white, size: 30),
+                    child: const Icon(
+                      Icons.person,
+                      color: Colors.white,
+                      size: 30,
+                    ),
                   ),
-                  
+
                   // Found Device Mock
-                  if (_foundDevice)
+                  if (discoveredDevices.isNotEmpty)
                     Positioned(
                       top: 40.h,
                       right: 60.w,
                       child: GestureDetector(
-                        onTap: () {
-                          Navigator.pushReplacement(
-                            context,
-                            MaterialPageRoute(builder: (context) => const TransferProgressScreen()),
-                          );
+                        onTap: () async {
+                          final device = discoveredDevices.first;
+                          print('Attempting to connect to ${device.name}...');
+
+                          // 1. Tell P2P hardware to build bridge
+                          bool connected = await ref
+                              .read(discoveryProvider.notifier)
+                              .connectToDevice(device.id);
+
+                          if (connected && context.mounted) {
+                            print('SUCCESSFULLY CONNECTED!');
+                            // TODO: Add transferring active files here in Riverpod
+                            Navigator.pushReplacement(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) =>
+                                    const TransferProgressScreen(),
+                              ),
+                            );
+                          } else {
+                            print('Failed to connect.');
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Failed to connect to device.'),
+                                ),
+                              );
+                            }
+                          }
                         },
                         child: Column(
                           children: [
@@ -122,7 +144,10 @@ class _RadarScanScreenState extends State<RadarScanScreen> with SingleTickerProv
                                 color: Colors.green,
                                 shape: BoxShape.circle,
                               ),
-                              child: const Icon(Icons.phone_android, color: Colors.white),
+                              child: const Icon(
+                                Icons.phone_android,
+                                color: Colors.white,
+                              ),
                             ),
                             SizedBox(height: 5.h),
                             Text(
@@ -141,7 +166,9 @@ class _RadarScanScreenState extends State<RadarScanScreen> with SingleTickerProv
             ),
             SizedBox(height: 50.h),
             Text(
-              _foundDevice ? 'Tap a device to send' : 'Searching for nearby devices...',
+              discoveredDevices.isNotEmpty
+                  ? 'Tap a device to send'
+                  : 'Searching for nearby devices...',
               style: TextStyle(
                 fontSize: 16.sp,
                 fontWeight: FontWeight.w500,

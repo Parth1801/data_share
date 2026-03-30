@@ -1,18 +1,21 @@
+import 'package:datatransfer/features/file_selection/providers/selected_files_provider.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import '../../../transfer/presentation/screens/radar_scan_screen.dart';
 import '../widgets/file_list_tab.dart';
 
-class FileSelectionScreen extends StatefulWidget {
+class FileSelectionScreen extends ConsumerStatefulWidget {
   const FileSelectionScreen({super.key});
 
   @override
-  State<FileSelectionScreen> createState() => _FileSelectionScreenState();
+  ConsumerState<FileSelectionScreen> createState() =>
+      _FileSelectionScreenState();
 }
 
-class _FileSelectionScreenState extends State<FileSelectionScreen> with SingleTickerProviderStateMixin {
+class _FileSelectionScreenState extends ConsumerState<FileSelectionScreen>
+    with SingleTickerProviderStateMixin {
   late TabController _tabController;
-  int _selectedFilesCount = 0;
 
   @override
   void initState() {
@@ -27,16 +30,14 @@ class _FileSelectionScreenState extends State<FileSelectionScreen> with SingleTi
   }
 
   void _toggleFileSelection() {
-    setState(() {
-      // Mock toggling file selection
-      _selectedFilesCount = _selectedFilesCount == 0 ? 5 : 0;
-    });
+    // This will be replaced by actual file selection logic using selectedFilesProvider
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final selectedFiles = ref.watch(selectedFilesProvider);
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
@@ -65,29 +66,49 @@ class _FileSelectionScreenState extends State<FileSelectionScreen> with SingleTi
           TabBarView(
             controller: _tabController,
             children: [
-              FileListTab(type: 'History', onToggleSelection: _toggleFileSelection),
-              FileListTab(type: 'Apps', onToggleSelection: _toggleFileSelection),
-              FileListTab(type: 'Photos', onToggleSelection: _toggleFileSelection, isGrid: true),
-              FileListTab(type: 'Music', onToggleSelection: _toggleFileSelection),
-              FileListTab(type: 'Videos', onToggleSelection: _toggleFileSelection, isGrid: true),
-              FileListTab(type: 'Files', onToggleSelection: _toggleFileSelection),
+              FileListTab(
+                type: 'History',
+                onToggleSelection: _toggleFileSelection,
+              ),
+              FileListTab(
+                type: 'Apps',
+                onToggleSelection: _toggleFileSelection,
+              ),
+              FileListTab(
+                type: 'Photos',
+                onToggleSelection: _toggleFileSelection,
+                isGrid: true,
+              ),
+              FileListTab(
+                type: 'Music',
+                onToggleSelection: _toggleFileSelection,
+              ),
+              FileListTab(
+                type: 'Videos',
+                onToggleSelection: _toggleFileSelection,
+                isGrid: true,
+              ),
+              FileListTab(
+                type: 'Files',
+                onToggleSelection: _toggleFileSelection,
+              ),
             ],
           ),
-          
+
           // Floating Bottom Send Bar
-          if (_selectedFilesCount > 0)
+          if (selectedFiles.isNotEmpty)
             Positioned(
               bottom: 20.h,
               left: 20.w,
               right: 20.w,
-              child: _buildFloatingSendBar(context, isDark),
+              child: _buildFloatingSendBar(context, isDark, selectedFiles.length),
             ),
         ],
       ),
     );
   }
 
-  Widget _buildFloatingSendBar(BuildContext context, bool isDark) {
+  Widget _buildFloatingSendBar(BuildContext context, bool isDark, int selectedCount) {
     return Container(
       padding: EdgeInsets.symmetric(horizontal: 20.w, vertical: 15.h),
       decoration: BoxDecoration(
@@ -107,7 +128,7 @@ class _FileSelectionScreenState extends State<FileSelectionScreen> with SingleTi
           Row(
             children: [
               Text(
-                '$_selectedFilesCount',
+                '$selectedCount',
                 style: TextStyle(
                   fontSize: 18.sp,
                   fontWeight: FontWeight.bold,
@@ -117,10 +138,7 @@ class _FileSelectionScreenState extends State<FileSelectionScreen> with SingleTi
               SizedBox(width: 8.w),
               Text(
                 'Selected',
-                style: TextStyle(
-                  fontSize: 16.sp,
-                  fontWeight: FontWeight.w600,
-                ),
+                style: TextStyle(fontSize: 16.sp, fontWeight: FontWeight.w600),
               ),
             ],
           ),
@@ -128,7 +146,9 @@ class _FileSelectionScreenState extends State<FileSelectionScreen> with SingleTi
             onPressed: () {
               Navigator.push(
                 context,
-                MaterialPageRoute(builder: (context) => const RadarScanScreen()),
+                MaterialPageRoute(
+                  builder: (context) => const RadarScanScreen(),
+                ),
               );
             },
             style: ElevatedButton.styleFrom(
