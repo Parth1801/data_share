@@ -4,6 +4,8 @@ import 'package:installed_apps/installed_apps.dart';
 import 'package:installed_apps/app_info.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:on_audio_query/on_audio_query.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:device_info_plus/device_info_plus.dart';
 
 // 1. Apps Provider
 final appsProvider = FutureProvider<List<AppInfo>>((ref) async {
@@ -46,16 +48,33 @@ final videosProvider = FutureProvider<List<AssetEntity>>((ref) async {
 // 4. Music Provider
 final audioProvider = FutureProvider<List<SongModel>>((ref) async {
   final OnAudioQuery audioQuery = OnAudioQuery();
-  bool permissionStatus = await audioQuery.permissionsStatus();
-  if (!permissionStatus) {
-    await audioQuery.permissionsRequest();
+  
+  // Robust permission handling for Android 13+
+  bool hasPermission = false;
+  if (Platform.isAndroid) {
+    final deviceInfo = await DeviceInfoPlugin().androidInfo;
+    if (deviceInfo.version.sdkInt >= 33) {
+      hasPermission = await Permission.audio.request().isGranted;
+    } else {
+      hasPermission = await Permission.storage.request().isGranted;
+    }
   }
-  return await audioQuery.querySongs(
-    sortType: null,
-    orderType: OrderType.ASC_OR_SMALLER,
-    uriType: UriType.EXTERNAL,
-    ignoreCase: true,
-  );
+
+  if (!hasPermission) {
+    return [];
+  }
+
+  try {
+    return await audioQuery.querySongs(
+      sortType: null,
+      orderType: OrderType.ASC_OR_SMALLER,
+      uriType: UriType.EXTERNAL,
+      ignoreCase: true,
+    );
+  } catch (e) {
+    print('Error querying songs: $e');
+    return [];
+  }
 });
 
 // 5. Files Provider (Downloads directory as a sample)
