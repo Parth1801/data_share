@@ -28,8 +28,21 @@
 
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
 
-    <!-- Declare hardware feature -->
-    <uses-feature android:name="android.hardware.wifi.direct" android:required="true" />
+    <!-- Bluetooth permissions (Legacy - up to Android 11 / API 30) -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30"/>
+
+    <!-- Bluetooth permissions (Android 12+ / API 31+) -->
+    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" tools:targetApi="s"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
+                     android:usesPermissionFlags="neverForLocation"
+                     tools:targetApi="s"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" tools:targetApi="s"/>
+
+    <!-- Declare hardware features -->
+    <uses-feature android:name="android.hardware.wifi.direct" android:required="true"/>
+    <uses-feature android:name="android.hardware.bluetooth" android:required="true"/>
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="true"/>
     <application
         android:label="datatransfer"
         android:name="${applicationName}"

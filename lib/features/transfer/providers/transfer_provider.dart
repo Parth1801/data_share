@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_p2p_connection/flutter_p2p_connection.dart';
@@ -14,7 +15,7 @@ class TransferState {
   final bool isCompleted;
   final bool isSending;
   final String? error;
-  
+
   bool get isTransferring => !isCompleted && files.isNotEmpty && error == null;
 
   TransferState({
@@ -24,7 +25,7 @@ class TransferState {
     this.currentFileIndex = 0,
     this.speedMBs = 0.0,
     this.isCompleted = false,
-    this.isSending = false, // Default to false
+    this.isSending = false,
     this.error,
   });
 
@@ -51,351 +52,374 @@ class TransferState {
   }
 }
 
+// Protocol message types sent over the WebSocket
+// SENDER → RECEIVER: {"type":"meta","index":0,"name":"file.jpg","size":12345}
+// SENDER → RECEIVER: binary bytes (raw file chunks)
+// SENDER → RECEIVER: {"type":"done","index":0}
+// RECEIVER → SENDER: {"type":"ready"}   (receiver is connected and waiting)
+// RECEIVER → SENDER: {"type":"next"}    (ready for next file)
+
 class TransferNotifier extends StateNotifier<TransferState> {
   TransferNotifier() : super(TransferState(files: []));
 
-  void reset() {
-    print('TransferNotifier: reset called. Clearing state.');
-    state = TransferState(files: [], isSending: false, overallProgress: 0.0);
-    _server?.close();
-    _server = null;
-    _protocolTriggered = false;
-    _lastConnectedAddress = null;
-    print('TransferNotifier: State Reset');
-  }
+  final _p2p = FlutterP2pConnection();
+  static const String _goIp = '192.168.49.1';
 
-  final _p2pConnection = FlutterP2pConnection();
-  HttpServer? _server;
-  String? _lastConnectedAddress;
-  bool _protocolTriggered = false;
+  // Used on receiver side to accumulate incoming file bytes
+  IOSink? _currentSink;
+  int _expectedBytes = 0;
+  int _receivedBytes = 0;
+  int _currentFileIndex = 0;
+  List<FileItem> _receiverFiles = [];
+  String _savePath = '';
+  DateTime _lastSpeedUpdate = DateTime.now();
+  int _lastSpeedBytes = 0;
+
+  void reset() {
+    _p2p.closeSocket();
+    _currentSink?.close();
+    _currentSink = null;
+    state = TransferState(files: []);
+  }
 
   @override
   void dispose() {
-    print('Disposing TransferNotifier...');
-    _server?.close();
-    _p2pConnection.closeSocket();
+    _p2p.closeSocket();
+    _currentSink?.close();
     super.dispose();
   }
 
-  Future<void> _startFileServer(List<FileItem> files) async {
-    try {
-      // Close existing server if any
-      await _server?.close(force: true);
-
-      _server = await HttpServer.bind(InternetAddress.anyIPv4, 9000);
-      print('File Server listening on port 9000');
-
-      _server!.listen((HttpRequest request) async {
-        if (request.uri.path == '/download') {
-          final fileName = request.uri.queryParameters['name'];
-          try {
-            final fileItem = files.firstWhere((f) => f.name == fileName);
-            final file = File(fileItem.path);
-
-            if (await file.exists()) {
-              try {
-                print('TransferNotifier: Sending file stream: ${file.path}');
-                request.response.headers.contentType = ContentType.binary;
-                request.response.headers.contentLength = await file.length();
-                await request.response.addStream(file.openRead());
-              } catch (e) {
-                print('TransferNotifier: Stream error during send: $e');
-              } finally {
-                try {
-                  await request.response.close();
-                } catch (_) {}
-              }
-            } else {
-              request.response.statusCode = HttpStatus.notFound;
-              await request.response.close();
-            }
-          } catch (e) {
-            request.response.statusCode = HttpStatus.notFound;
-            await request.response.close();
-          }
-        } else {
-          request.response.statusCode = HttpStatus.notFound;
-        }
-        await request.response.close();
-      });
-    } catch (e) {
-      print('Error starting file server: $e');
-    }
-  }
+  // ─── SENDER ────────────────────────────────────────────────────────────────
 
   Future<void> startSending(
     List<FileItem> files,
     String groupOwnerAddress,
     bool isGroupOwner,
   ) async {
-    _protocolTriggered = true;
-    print('TransferNotifier: startSending called. Setting isSending = true. Files: ${files.length}');
-    state = TransferState(files: files, isSending: true, overallProgress: 0.0);
-    print('Starting Sender Protocol... isGroupOwner: $isGroupOwner');
+    state = TransferState(files: files, isSending: true);
 
-    await _startFileServer(files);
+    final readyCompleter = Completer<void>();
 
-    final normalizedAddress = groupOwnerAddress.replaceFirst("/", "");
+    void onConnect(String address) {
+      // Socket connected — wait for receiver's "ready" signal before sending
+    }
 
-    if (isGroupOwner) {
-      print('Sender: Binding P2P Socket as Server at $normalizedAddress...');
-      await _p2pConnection.startSocket(
-        groupOwnerAddress: normalizedAddress,
-        onConnect: (address) {
-          print('Sender (GO): Client connected: $address');
-          Future.delayed(const Duration(seconds: 1), () => _sendMetadata(files));
-        },
-        onRequest: (data) {
-          print('Sender (GO): Received: $data');
-          _handleSocketMessage(data);
-        },
-      );
-    } else {
-      print('Sender: Connecting to P2P Socket as Client at $normalizedAddress...');
-      bool connected = false;
-      int retries = 0;
-      while (!connected && retries < 5) {
-        await _p2pConnection.connectToSocket(
-          groupOwnerAddress: normalizedAddress,
-          onConnect: (address) {
-            print('Sender (Client): Connected to host: $address');
-            connected = true;
-            Future.delayed(const Duration(seconds: 1), () => _sendMetadata(files));
-          },
-          onRequest: (data) {
-            print('Sender (Client): Received: $data');
-            _handleSocketMessage(data);
-          },
-        );
-        if (connected) break;
-        retries++;
-        print('Sender: Connection attempt $retries failed, retrying...');
-        await Future.delayed(const Duration(seconds: 2));
-      }
-
-      if (!connected) {
-        state = state.copyWith(
-          error: 'Sender: Failed to connect to Receiver socket.',
-        );
+    void onRequest(dynamic data) {
+      if (data is String) {
+        try {
+          final msg = jsonDecode(data);
+          if (msg['type'] == 'ready' && !readyCompleter.isCompleted) {
+            readyCompleter.complete();
+          }
+          if (msg['type'] == 'progress' && mounted) {
+            state = state.copyWith(
+              overallProgress: (msg['overall'] as num?)?.toDouble() ?? 0.0,
+              currentFileIndex: msg['current'] ?? 0,
+              speedMBs: (msg['speed'] as num?)?.toDouble() ?? 0.0,
+            );
+          }
+        } catch (_) {}
       }
     }
-  }
-
-  void _sendMetadata(List<FileItem> files) {
-    print('Sender: Preparing metadata for ${files.length} files...');
-    final metadata = {
-      'type': 'metadata',
-      'files': files
-          .map((f) => {'name': f.name, 'sizeMB': f.sizeMB, 'type': f.type})
-          .toList(),
-    };
-    final jsonString = jsonEncode(metadata);
-    print('Sender: Sending metadata (size: ${jsonString.length} chars)');
-    _p2pConnection.sendStringToSocket(jsonString);
-  }
-
-  Future<void> startReceiving(String hostAddress, bool isGroupOwner) async {
-    state = TransferState(files: [], isSending: false);
-    print('Starting Receiver Protocol... isGroupOwner: $isGroupOwner');
 
     bool connected = false;
-
-    final onConnect = (address) {
-      print('Receiver Socket Connected: $address');
-      _lastConnectedAddress = address; // Store the sender's IP if we are GO
-      connected = true;
-      _p2pConnection.sendStringToSocket(
-        jsonEncode({'type': 'ping', 'message': 'Hello from Receiver'}),
-      );
-    };
-
-    final onRequest = (data) async {
-      print('Receiver: Socket received data: $data');
-      try {
-        final decoded = jsonDecode(data.toString());
-        if (decoded['type'] == 'metadata') {
-          print('Receiver: Valid metadata JSON detected.');
-          final List<dynamic> incomingFiles = decoded['files'];
-          final files = incomingFiles
-              .map(
-                (f) => FileItem(
-                  id: f['name'],
-                  name: f['name'],
-                  sizeMB: f['sizeMB'],
-                  type: f['type'],
-                  path: '',
-                ),
-              )
-              .toList();
-
-          if (!mounted) return;
-          state = state.copyWith(files: files);
-
-          // If we are GO, we download from the client's IP (_lastConnectedAddress)
-          // If we are Client, we download from the GO's IP (hostAddress)
-          // IMPORTANT: Capture only the IP, strip the port if present (e.g. 192.168.49.123:4045)
-          String downloadHost = hostAddress
-              .replaceFirst("/", "")
-              .split(':')
-              .first;
-
-    // DYNAMIC IP RESOLUTION
-    String realTargetAddress = hostAddress;
     if (isGroupOwner) {
-      // If we ARE the GO, we connect to the first client
-      // Assuming info is available or passed contextually
-      // realTargetAddress = info.clients[0].deviceAddress; 
-    } else {
-      // If we are CLient, target is ALWAYS the GO address
-      realTargetAddress = hostAddress.replaceFirst('/', '');
-    }
-    
-    print('TransferNotifier: Real Target IP resolved to: $realTargetAddress');
-    _lastConnectedAddress = realTargetAddress;
-
-          if (isGroupOwner && _lastConnectedAddress != null) {
-            downloadHost = _lastConnectedAddress!
-                .replaceFirst("/", "")
-                .split(':')
-                .first;
-            print('Receiver (Host): Using Sender (Client) IP: $downloadHost');
-          } else {
-            print('Receiver (Client): Using Host IP: $downloadHost');
-          }
-
-          print('Receiver: Initiating download from $downloadHost:9000');
-          await _downloadFiles(downloadHost, files);
-        }
-      } catch (e) {
-        print('Receiver: Error handling metadata: $e');
-      }
-    };
-
-    if (isGroupOwner) {
-      print('Receiver: Binding P2P Socket as Server at $hostAddress...');
-      await _p2pConnection.startSocket(
-        groupOwnerAddress: hostAddress.replaceFirst("/", ""),
+      // Sender is GO: bind socket server, receiver will connect to us
+      connected = await _p2p.startSocket(
+        groupOwnerAddress: _goIp,
         onConnect: onConnect,
         onRequest: onRequest,
       );
     } else {
-      print('Receiver: Connecting to P2P Socket as Client at $hostAddress...');
-      // Retried connection logic moved inside for robustness
-      int retries = 0;
-      while (!connected && retries < 5) {
-        await _p2pConnection.connectToSocket(
-          groupOwnerAddress: hostAddress.replaceFirst("/", ""),
+      // Sender is client: connect to GO's socket
+      for (int attempt = 0; attempt < 8 && !connected; attempt++) {
+        connected = await _p2p.connectToSocket(
+          groupOwnerAddress: _goIp,
           onConnect: onConnect,
           onRequest: onRequest,
         );
-        if (connected) break;
-        retries++;
-        await Future.delayed(const Duration(seconds: 2));
+        if (!connected) await Future.delayed(const Duration(seconds: 2));
       }
     }
-
-    // Give it a moment to confirm connection state if it's a server (it doesn't "connect" itself)
-    if (isGroupOwner) connected = true;
 
     if (!connected) {
-      state = state.copyWith(error: 'Failed to establish socket connection.');
+      if (mounted)
+        state = state.copyWith(error: 'Could not establish socket connection.');
+      return;
     }
+
+    // Wait for receiver to signal ready (max 30s)
+    try {
+      await readyCompleter.future.timeout(const Duration(seconds: 30));
+    } on TimeoutException {
+      if (mounted)
+        state = state.copyWith(error: 'Receiver did not respond in time.');
+      return;
+    }
+
+    // Send files one by one over the socket
+    await _sendFilesOverSocket(files);
   }
 
-  Future<void> _downloadFiles(String downloadHost, List<FileItem> files) async {
-    final Directory? downloadDir = await getExternalStorageDirectory();
-    final String savePath = '${downloadDir?.path}/DataTransfer';
-    final dir = Directory(savePath);
-    if (!await dir.exists()) await dir.create(recursive: true);
+  Future<void> _sendFilesOverSocket(List<FileItem> files) async {
+    const int chunkSize = 64 * 1024; // 64 KB chunks
 
     for (int i = 0; i < files.length; i++) {
-      final file = files[i];
-      if (mounted) state = state.copyWith(currentFileIndex: i, currentFileProgress: 0.0);
+      if (!mounted) break;
+      final fileItem = files[i];
+      final file = File(fileItem.path);
 
-      try {
-        final client = HttpClient();
-        final url =
-            'http://$downloadHost:9000/download?name=${Uri.encodeComponent(file.name)}';
-        print('Receiver: GET $url');
+      if (!await file.exists()) {
+        if (mounted) {
+          state = state.copyWith(
+            error: 'File not found: ${fileItem.name}\nPath: "${fileItem.path}"',
+          );
+        }
+        return;
+      }
 
-        final request = await client.getUrl(Uri.parse(url)).timeout(const Duration(seconds: 5));
-        final response = await request.close();
+      final fileSize = await file.length();
 
-        print('Receiver: Response status: ${response.statusCode} from $downloadHost');
+      // Send metadata header
+      _p2p.sendStringToSocket(
+        jsonEncode({
+          'type': 'meta',
+          'index': i,
+          'name': fileItem.name,
+          'size': fileSize,
+          'total': files.length,
+        }),
+      );
 
-        if (response.statusCode == 200) {
-          final fileToSave = File('$savePath/${file.name}');
-          print('Receiver: Saving to ${fileToSave.path}');
-          final sink = fileToSave.openWrite();
+      // Small delay to ensure metadata arrives before binary data
+      await Future.delayed(const Duration(milliseconds: 100));
 
-          int downloaded = 0;
-          final total = response.contentLength;
-          print('Receiver: File size: $total bytes');
+      // Stream file bytes in chunks
+      int sent = 0;
+      DateTime lastUpdate = DateTime.now();
+      int lastBytes = 0;
 
-          DateTime lastUpdateTime = DateTime.now();
-          int lastDownloaded = 0;
+      await for (final chunk in file.openRead()) {
+        if (!mounted) break;
+        // Send in fixed-size chunks to avoid overwhelming the socket
+        for (int offset = 0; offset < chunk.length; offset += chunkSize) {
+          final end = (offset + chunkSize).clamp(0, chunk.length);
+          final slice = chunk.sublist(offset, end);
+          _p2p.sendStringToSocket(base64Encode(slice));
+          sent += slice.length;
 
-          await response.listen((chunk) {
-            sink.add(chunk);
-            downloaded += chunk.length;
-            
-            final now = DateTime.now();
-            if (now.difference(lastUpdateTime).inMilliseconds > 500) {
-              final double duration = now.difference(lastUpdateTime).inMilliseconds / 1000.0;
-              final double speed = (downloaded - lastDownloaded) / (1024 * 1024 * duration);
-              
-              if (!mounted) return;
+          final now = DateTime.now();
+          if (now.difference(lastUpdate).inMilliseconds > 300) {
+            final secs = now.difference(lastUpdate).inMilliseconds / 1000.0;
+            final speed = (sent - lastBytes) / (1024 * 1024 * secs);
+            final fileProg = fileSize > 0 ? sent / fileSize : 0.0;
+            if (mounted) {
               state = state.copyWith(
-                currentFileProgress: downloaded / total,
-                overallProgress: (i + (downloaded / total)) / files.length,
+                currentFileIndex: i,
+                currentFileProgress: fileProg,
+                overallProgress: (i + fileProg) / files.length,
                 speedMBs: speed,
               );
-              
-              // Sync progress back to Sender
-              _p2pConnection.sendStringToSocket(jsonEncode({
-                'type': 'progress',
-                'overall': (i + (downloaded / total)) / files.length,
-                'current': i,
-                'speed': speed,
-              }));
-              
-              lastUpdateTime = now;
-              lastDownloaded = downloaded;
             }
-          }).asFuture();
-
-          await sink.close();
-          print('Receiver: Successfully saved ${file.name}');
-        } else {
-          print('Receiver: Download failed with status ${response.statusCode}');
+            lastUpdate = now;
+            lastBytes = sent;
+          }
         }
-      } catch (e) {
-        print('Receiver: Exception during download of ${file.name}: $e');
       }
-    }
 
-    state = state.copyWith(isCompleted: true, overallProgress: 1.0);
-  }
+      // Signal end of this file
+      _p2p.sendStringToSocket(jsonEncode({'type': 'done', 'index': i}));
 
-  void _handleSocketMessage(dynamic data) {
-    try {
-      final decoded = jsonDecode(data.toString());
-      if (decoded['type'] == 'progress') {
-        if (!mounted) return;
+      if (mounted) {
         state = state.copyWith(
-          overallProgress: decoded['overall']?.toDouble() ?? 0.0,
-          currentFileIndex: decoded['current'] ?? 0,
-          speedMBs: decoded['speed']?.toDouble() ?? 0.0,
+          currentFileIndex: i,
+          currentFileProgress: 1.0,
+          overallProgress: (i + 1) / files.length,
         );
       }
-    } catch (e) {
-      print('Error handling socket message: $e');
+
+      // Wait a bit between files
+      await Future.delayed(const Duration(milliseconds: 200));
     }
+
+    if (mounted)
+      state = state.copyWith(isCompleted: true, overallProgress: 1.0);
+  }
+
+  // ─── RECEIVER ──────────────────────────────────────────────────────────────
+
+  Future<void> startReceiving(
+    String groupOwnerAddress,
+    bool isGroupOwner,
+  ) async {
+    state = TransferState(files: [], isSending: false);
+
+    final Directory? dir = await getExternalStorageDirectory();
+    _savePath = '${dir?.path}/DataTransfer';
+    await Directory(_savePath).create(recursive: true);
+
+    _currentFileIndex = 0;
+    _receiverFiles = [];
+    _currentSink = null;
+    _expectedBytes = 0;
+    _receivedBytes = 0;
+
+    void onConnect(String address) {
+      // Signal sender that we're ready to receive
+      _p2p.sendStringToSocket(jsonEncode({'type': 'ready'}));
+    }
+
+    void onRequest(dynamic data) {
+      _handleReceiverData(data);
+    }
+
+    bool connected = false;
+    if (isGroupOwner) {
+      // Receiver is GO: bind socket server
+      connected = await _p2p.startSocket(
+        groupOwnerAddress: _goIp,
+        onConnect: onConnect,
+        onRequest: onRequest,
+      );
+    } else {
+      // Receiver is client: connect to GO's socket
+      for (int attempt = 0; attempt < 8 && !connected; attempt++) {
+        connected = await _p2p.connectToSocket(
+          groupOwnerAddress: _goIp,
+          onConnect: onConnect,
+          onRequest: onRequest,
+        );
+        if (!connected) await Future.delayed(const Duration(seconds: 2));
+      }
+    }
+
+    if (!connected && mounted) {
+      state = state.copyWith(error: 'Could not connect to sender socket.');
+    }
+  }
+
+  void _handleReceiverData(dynamic data) {
+    if (data is String) {
+      // Try to parse as JSON control message first
+      try {
+        final msg = jsonDecode(data);
+        final type = msg['type'] as String?;
+
+        if (type == 'meta') {
+          // New file incoming
+          _currentFileIndex = msg['index'] as int;
+          final name = msg['name'] as String;
+          final size = msg['size'] as int;
+          final total = msg['total'] as int;
+
+          _expectedBytes = size;
+          _receivedBytes = 0;
+          _lastSpeedUpdate = DateTime.now();
+          _lastSpeedBytes = 0;
+
+          final fileItem = FileItem(
+            id: name,
+            name: name,
+            sizeMB: size / (1024 * 1024),
+            type: _inferType(name),
+            path: '$_savePath/$name',
+          );
+
+          // Add to file list if not already there
+          final existing = List<FileItem>.from(state.files);
+          if (_currentFileIndex >= existing.length) {
+            existing.add(fileItem);
+          } else {
+            existing[_currentFileIndex] = fileItem;
+          }
+          _receiverFiles = existing;
+
+          if (mounted) {
+            state = state.copyWith(
+              files: existing,
+              currentFileIndex: _currentFileIndex,
+              currentFileProgress: 0.0,
+              overallProgress: _currentFileIndex / total,
+            );
+          }
+
+          // Open file for writing
+          _currentSink?.close();
+          _currentSink = File('$_savePath/$name').openWrite();
+        } else if (type == 'done') {
+          // File transfer complete
+          _currentSink?.close();
+          _currentSink = null;
+          final total = _receiverFiles.length;
+          final idx = msg['index'] as int;
+
+          if (mounted) {
+            state = state.copyWith(
+              currentFileIndex: idx,
+              currentFileProgress: 1.0,
+              overallProgress: (idx + 1) / total,
+              isCompleted: idx == total - 1,
+            );
+          }
+        }
+        return;
+      } catch (_) {
+        // Not JSON — it's a base64-encoded file chunk
+      }
+
+      // Decode base64 chunk and write to file
+      try {
+        final bytes = base64Decode(data);
+        _currentSink?.add(bytes);
+        _receivedBytes += bytes.length;
+
+        final now = DateTime.now();
+        if (now.difference(_lastSpeedUpdate).inMilliseconds > 300) {
+          final secs = now.difference(_lastSpeedUpdate).inMilliseconds / 1000.0;
+          final speed =
+              (_receivedBytes - _lastSpeedBytes) / (1024 * 1024 * secs);
+          final fileProg = _expectedBytes > 0
+              ? _receivedBytes / _expectedBytes
+              : 0.0;
+          final total = _receiverFiles.length;
+
+          if (mounted) {
+            state = state.copyWith(
+              currentFileProgress: fileProg,
+              overallProgress: total > 0
+                  ? (_currentFileIndex + fileProg) / total
+                  : 0.0,
+              speedMBs: speed,
+            );
+            // Report progress back to sender
+            _p2p.sendStringToSocket(
+              jsonEncode({
+                'type': 'progress',
+                'overall': total > 0
+                    ? (_currentFileIndex + fileProg) / total
+                    : 0.0,
+                'current': _currentFileIndex,
+                'speed': speed,
+              }),
+            );
+          }
+          _lastSpeedUpdate = now;
+          _lastSpeedBytes = _receivedBytes;
+        }
+      } catch (_) {}
+    }
+  }
+
+  String _inferType(String fileName) {
+    final ext = fileName.split('.').last.toLowerCase();
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].contains(ext))
+      return 'Photo';
+    if (['mp4', 'mkv', 'avi', 'mov', 'webm'].contains(ext)) return 'Video';
+    if (['mp3', 'aac', 'wav', 'flac', 'ogg'].contains(ext)) return 'Audio';
+    return 'File';
   }
 }
 
 final transferProvider = StateNotifierProvider<TransferNotifier, TransferState>(
-  (ref) {
-    return TransferNotifier();
-  },
+  (ref) => TransferNotifier(),
 );

@@ -16,7 +16,7 @@ class ReceiveScreen extends ConsumerStatefulWidget {
   ConsumerState<ReceiveScreen> createState() => _ReceiveScreenState();
 }
 
-class _ReceiveScreenState extends ConsumerState<ReceiveScreen> 
+class _ReceiveScreenState extends ConsumerState<ReceiveScreen>
     with SingleTickerProviderStateMixin {
   late AnimationController _controller;
   bool _navigated = false;
@@ -30,7 +30,7 @@ class _ReceiveScreenState extends ConsumerState<ReceiveScreen>
       vsync: this,
       duration: const Duration(seconds: 4),
     )..repeat();
-    
+
     // Start Hotspot to receive
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(discoveryProvider.notifier).startHotspotGroup();
@@ -39,15 +39,19 @@ class _ReceiveScreenState extends ConsumerState<ReceiveScreen>
 
   Future<void> checkAndRequestPermissions() async {
     if (!await Permission.storage.isGranted) await Permission.storage.request();
-    if (!await Permission.location.isGranted) await Permission.location.request();
-    if (!await Permission.nearbyWifiDevices.isGranted) await Permission.nearbyWifiDevices.request();
-    if (!await Permission.bluetooth.isGranted) await Permission.bluetooth.request();
+    if (!await Permission.location.isGranted)
+      await Permission.location.request();
+    if (!await Permission.nearbyWifiDevices.isGranted)
+      await Permission.nearbyWifiDevices.request();
+    if (!await Permission.bluetooth.isGranted)
+      await Permission.bluetooth.request();
   }
 
   Future<void> checkAndEnableServices() async {
     final p2p = FlutterP2pConnection();
     if (await p2p.checkWifiEnabled() != true) await p2p.enableWifiServices();
-    if (await p2p.checkLocationEnabled() != true) await p2p.enableLocationServices();
+    if (await p2p.checkLocationEnabled() != true)
+      await p2p.enableLocationServices();
   }
 
   // Removed _startDiscovery as it is handled by the provider init or explicit calls
@@ -56,7 +60,10 @@ class _ReceiveScreenState extends ConsumerState<ReceiveScreen>
   void dispose() {
     _controller.dispose();
     _protocolTimer?.cancel();
-    ref.read(discoveryProvider.notifier).stopScanning();
+    // Only stop scanning if we haven't navigated to transfer — stopping kills the P2P connection
+    if (!_navigated) {
+      ref.read(discoveryProvider.notifier).stopScanning();
+    }
     super.dispose();
   }
 
@@ -66,20 +73,24 @@ class _ReceiveScreenState extends ConsumerState<ReceiveScreen>
 
     // Handshake listener moved to handshakeRole below
 
-    ref.listen(discoveryProvider.select((s) => s.handshakeRole), (previous, next) {
+    ref.listen(discoveryProvider.select((s) => s.handshakeRole), (
+      previous,
+      next,
+    ) {
       if (mounted && next == HandshakeRole.receiving && !_navigated) {
         _navigated = true;
-        
+
         final info = ref.read(discoveryProvider).connectionInfo;
-        final myAddress = info?.groupOwnerAddress ?? "192.168.49.1";
+        final goAddress = info?.groupOwnerAddress ?? '192.168.49.1';
         final isGO = info?.isGroupOwner ?? true;
-        
-        print('ReceiveScreen: Handshake detected. Starting Transfer as Receiver.');
-        ref.read(transferProvider.notifier).startReceiving(myAddress, isGO);
-        
+
+        ref.read(transferProvider.notifier).startReceiving(goAddress, isGO);
+
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (context) => const TransferProgressScreen()),
+          MaterialPageRoute(
+            builder: (context) => const TransferProgressScreen(),
+          ),
         );
       }
     });
@@ -97,53 +108,89 @@ class _ReceiveScreenState extends ConsumerState<ReceiveScreen>
               children: [
                 SizedBox(height: 50.h),
                 Text(
-                  discoveryState.hotspotStatus == HotspotStatus.active 
-                      ? 'Radar Active' 
-                      : (discoveryState.hotspotStatus == HotspotStatus.initializing 
-                          ? 'Starting Radar...' 
-                          : (discoveryState.hotspotStatus == HotspotStatus.failed ? 'Radar Failed' : 'Radar Offline')),
+                  discoveryState.hotspotStatus == HotspotStatus.active
+                      ? 'Radar Active'
+                      : (discoveryState.hotspotStatus ==
+                                HotspotStatus.initializing
+                            ? 'Starting Radar...'
+                            : (discoveryState.hotspotStatus ==
+                                      HotspotStatus.failed
+                                  ? 'Radar Failed'
+                                  : 'Radar Offline')),
                   style: TextStyle(
-                    fontSize: 20.sp, 
-                    fontWeight: FontWeight.bold, 
-                    color: discoveryState.hotspotStatus == HotspotStatus.active 
-                        ? Colors.green 
-                        : (discoveryState.hotspotStatus == HotspotStatus.failed ? Colors.red : Colors.orange),
+                    fontSize: 20.sp,
+                    fontWeight: FontWeight.bold,
+                    color: discoveryState.hotspotStatus == HotspotStatus.active
+                        ? Colors.green
+                        : (discoveryState.hotspotStatus == HotspotStatus.failed
+                              ? Colors.red
+                              : Colors.orange),
                   ),
                 ),
                 SizedBox(height: 12.h),
                 Container(
-                  padding: EdgeInsets.symmetric(horizontal: 16.w, vertical: 8.h),
+                  padding: EdgeInsets.symmetric(
+                    horizontal: 16.w,
+                    vertical: 8.h,
+                  ),
                   decoration: BoxDecoration(
-                    color: (discoveryState.hotspotStatus == HotspotStatus.active ? Colors.green : Colors.orange).withOpacity(0.1),
+                    color:
+                        (discoveryState.hotspotStatus == HotspotStatus.active
+                                ? Colors.green
+                                : Colors.orange)
+                            .withOpacity(0.1),
                     borderRadius: BorderRadius.circular(20.r),
                     border: Border.all(
-                      color: (discoveryState.hotspotStatus == HotspotStatus.active ? Colors.green : Colors.orange).withOpacity(0.3),
+                      color:
+                          (discoveryState.hotspotStatus == HotspotStatus.active
+                                  ? Colors.green
+                                  : Colors.orange)
+                              .withOpacity(0.3),
                     ),
                   ),
                   child: Text(
-                    discoveryState.hotspotStatus == HotspotStatus.active 
-                        ? 'Ready for connection (Invisible to System)' 
-                        : (discoveryState.hotspotStatus == HotspotStatus.initializing ? 'Configuring P2P Network...' : 'Tap to try again'),
+                    discoveryState.hotspotStatus == HotspotStatus.active
+                        ? 'Ready for connection (Invisible to System)'
+                        : (discoveryState.hotspotStatus ==
+                                  HotspotStatus.initializing
+                              ? 'Configuring P2P Network...'
+                              : 'Tap to try again'),
                     style: TextStyle(
-                      fontSize: 12.sp, 
-                      color: discoveryState.hotspotStatus == HotspotStatus.active ? Colors.green : Colors.orange,
+                      fontSize: 12.sp,
+                      color:
+                          discoveryState.hotspotStatus == HotspotStatus.active
+                          ? Colors.green
+                          : Colors.orange,
                       fontWeight: FontWeight.w500,
                     ),
                   ),
                 ),
-                if (discoveryState.hotspotStatus == HotspotStatus.failed || discoveryState.hotspotStatus == HotspotStatus.idle)
+                if (discoveryState.hotspotStatus == HotspotStatus.failed ||
+                    discoveryState.hotspotStatus == HotspotStatus.idle)
                   ElevatedButton.icon(
-                    onPressed: () => ref.read(discoveryProvider.notifier).startHotspotGroup(),
+                    onPressed: () => ref
+                        .read(discoveryProvider.notifier)
+                        .startHotspotGroup(),
                     icon: Icon(Icons.radar, color: Colors.white),
-                    label: Text(discoveryState.hotspotStatus == HotspotStatus.failed ? 'Retry Radar' : 'Start Radar'),
+                    label: Text(
+                      discoveryState.hotspotStatus == HotspotStatus.failed
+                          ? 'Retry Radar'
+                          : 'Start Radar',
+                    ),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: discoveryState.hotspotStatus == HotspotStatus.failed ? Colors.red : Colors.green,
+                      backgroundColor:
+                          discoveryState.hotspotStatus == HotspotStatus.failed
+                          ? Colors.red
+                          : Colors.green,
                       foregroundColor: Colors.white,
-                      padding: EdgeInsets.symmetric(horizontal: 24.w, vertical: 12.h),
+                      padding: EdgeInsets.symmetric(
+                        horizontal: 24.w,
+                        vertical: 12.h,
+                      ),
                     ),
                   ),
                 SizedBox(height: 20.h),
-                
+
                 // Radar Section
                 SizedBox(
                   height: 350.h,
@@ -154,7 +201,7 @@ class _ReceiveScreenState extends ConsumerState<ReceiveScreen>
                       _buildRadarCircle(300.w, 0.1),
                       _buildRadarCircle(200.w, 0.2),
                       _buildRadarCircle(100.w, 0.3),
-                      
+
                       RotationTransition(
                         turns: _controller,
                         child: Container(
@@ -173,7 +220,7 @@ class _ReceiveScreenState extends ConsumerState<ReceiveScreen>
                           ),
                         ),
                       ),
-                      
+
                       // Center Icon (Receiver)
                       Container(
                         width: 60.w,
@@ -189,27 +236,40 @@ class _ReceiveScreenState extends ConsumerState<ReceiveScreen>
                             ),
                           ],
                         ),
-                        child: const Icon(Icons.download, color: Colors.white, size: 30),
+                        child: const Icon(
+                          Icons.download,
+                          color: Colors.white,
+                          size: 30,
+                        ),
                       ),
-                      
+
                       // Connected Senders on Radar
                       if (discoveryState.connectionInfo != null)
-                        ...discoveryState.connectionInfo!.clients.asMap().entries.map((entry) {
-                          final int index = entry.key;
-                          final client = entry.value;
-                          final double radius = (index % 2 == 0) ? 100.w : 130.w; 
-                          final double angle = (index * 72) * (math.pi / 180);
-                          
-                          return Positioned(
-                            left: 175.w + radius * math.cos(angle) - 25.w,
-                            top: 175.w + radius * math.sin(angle) - 25.w,
-                            child: _buildDeviceIcon(client.deviceName, Colors.green),
-                          );
-                        }),
+                        ...discoveryState.connectionInfo!.clients
+                            .asMap()
+                            .entries
+                            .map((entry) {
+                              final int index = entry.key;
+                              final client = entry.value;
+                              final double radius = (index % 2 == 0)
+                                  ? 100.w
+                                  : 130.w;
+                              final double angle =
+                                  (index * 72) * (math.pi / 180);
+
+                              return Positioned(
+                                left: 175.w + radius * math.cos(angle) - 25.w,
+                                top: 175.w + radius * math.sin(angle) - 25.w,
+                                child: _buildDeviceIcon(
+                                  client.deviceName,
+                                  Colors.green,
+                                ),
+                              );
+                            }),
                     ],
                   ),
                 ),
-                
+
                 SizedBox(height: 30.h),
                 Padding(
                   padding: EdgeInsets.symmetric(horizontal: 20.w),
@@ -230,7 +290,11 @@ class _ReceiveScreenState extends ConsumerState<ReceiveScreen>
                     SizedBox(height: 20.h),
                     const Text(
                       'Connecting to Sender...',
-                      style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ],
                 ),
@@ -243,13 +307,16 @@ class _ReceiveScreenState extends ConsumerState<ReceiveScreen>
 
   Widget _buildDeviceList() {
     final discoveryState = ref.watch(discoveryProvider);
-    
+
     if (discoveryState.connectionInfo?.clients.isEmpty ?? true) {
       return Column(
         children: [
           const CircularProgressIndicator(color: Colors.green),
           SizedBox(height: 10.h),
-          const Text('Waiting for someone to connect...', style: TextStyle(color: Colors.grey)),
+          const Text(
+            'Waiting for someone to connect...',
+            style: TextStyle(color: Colors.grey),
+          ),
         ],
       );
     }

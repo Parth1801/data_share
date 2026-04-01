@@ -28,7 +28,7 @@ class _RadarScanScreenState extends ConsumerState<RadarScanScreen>
       vsync: this,
       duration: const Duration(seconds: 4),
     )..repeat();
-    
+
     // Start scanning for receivers
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(discoveryProvider.notifier).discoverPeers();
@@ -46,24 +46,28 @@ class _RadarScanScreenState extends ConsumerState<RadarScanScreen>
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final discoveryState = ref.watch(discoveryProvider);
-    final hotspotStatus = discoveryState.hotspotStatus;
-    final isConnected = discoveryState.connectionInfo?.groupFormed ?? false;
 
-    ref.listen(discoveryProvider.select((s) => s.handshakeRole), (previous, next) {
+    ref.listen(discoveryProvider.select((s) => s.handshakeRole), (
+      previous,
+      next,
+    ) {
       if (mounted && next == HandshakeRole.sending && !_navigated) {
         _navigated = true;
-        
+
         final selectedFiles = ref.read(selectedFilesProvider);
         final info = ref.read(discoveryProvider).connectionInfo;
-        final targetAddress = info?.groupOwnerAddress ?? "192.168.49.1";
+        final goAddress = info?.groupOwnerAddress ?? '192.168.49.1';
         final isGO = info?.isGroupOwner ?? false;
-        
-        print('RadarScanScreen: Handshake detected. Starting Transfer as Sender.');
-        ref.read(transferProvider.notifier).startSending(selectedFiles, targetAddress, isGO);
-        
+
+        ref
+            .read(transferProvider.notifier)
+            .startSending(selectedFiles, goAddress, isGO);
+
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (context) => const TransferProgressScreen()),
+          MaterialPageRoute(
+            builder: (context) => const TransferProgressScreen(),
+          ),
         );
       }
     });
@@ -91,7 +95,7 @@ class _RadarScanScreenState extends ConsumerState<RadarScanScreen>
                       _buildRadarCircle(300.w, 0.1),
                       _buildRadarCircle(200.w, 0.2),
                       _buildRadarCircle(100.w, 0.3),
-    
+
                       // Radar Sweep Animation
                       RotationTransition(
                         turns: _controller,
@@ -111,7 +115,7 @@ class _RadarScanScreenState extends ConsumerState<RadarScanScreen>
                           ),
                         ),
                       ),
-    
+
                       // Center Icon (Sender)
                       Container(
                         width: 60.w,
@@ -133,20 +137,25 @@ class _RadarScanScreenState extends ConsumerState<RadarScanScreen>
                           size: 30,
                         ),
                       ),
-                      
+
                       // Discovered Receivers on Radar
                       ...discoveryState.devices.asMap().entries.map((entry) {
                         final int index = entry.key;
                         final device = entry.value;
-                        final double radius = (index % 2 == 0) ? 100.w : 130.w; 
+                        final double radius = (index % 2 == 0) ? 100.w : 130.w;
                         final double angle = (index * 72) * (math.pi / 180);
-                        
+
                         return Positioned(
                           left: 175.w + radius * math.cos(angle) - 25.w,
                           top: 175.w + radius * math.sin(angle) - 25.w,
                           child: GestureDetector(
-                            onTap: () => ref.read(discoveryProvider.notifier).connectToPeer(device.id),
-                            child: _buildDeviceIcon(device.name, theme.primaryColor),
+                            onTap: () => ref
+                                .read(discoveryProvider.notifier)
+                                .connectToPeer(device.id),
+                            child: _buildDeviceIcon(
+                              device.name,
+                              theme.primaryColor,
+                            ),
                           ),
                         );
                       }),
@@ -154,32 +163,21 @@ class _RadarScanScreenState extends ConsumerState<RadarScanScreen>
                   ),
                 ),
                 SizedBox(height: 30.h),
-                if (discoveryState.connectionInfo?.clients.isNotEmpty ?? false) ...[
-                   Text(
-                    'Connected Devices:',
-                    style: TextStyle(fontSize: 14.sp, fontWeight: FontWeight.bold, color: theme.primaryColor),
-                  ),
-                  SizedBox(height: 10.h),
-                  Container(
-                    constraints: BoxConstraints(maxHeight: 100.h),
-                    child: ListView.builder(
-                      shrinkWrap: true,
-                      itemCount: discoveryState.connectionInfo!.clients.length,
-                      itemBuilder: (context, index) {
-                        final client = discoveryState.connectionInfo!.clients[index];
-                        return ListTile(
-                          dense: true,
-                          leading: const Icon(Icons.phone_android),
-                          title: Text(client.deviceName),
-                          subtitle: Text(client.deviceAddress),
-                        );
-                      },
+                if (discoveryState.isConnecting) ...[
+                  Text(
+                    'Connecting...',
+                    style: TextStyle(
+                      fontSize: 14.sp,
+                      fontWeight: FontWeight.bold,
+                      color: theme.primaryColor,
                     ),
                   ),
-                  SizedBox(height: 20.h),
+                  SizedBox(height: 10.h),
                 ],
                 Text(
-                  'Looking for receivers...',
+                  discoveryState.devices.isEmpty
+                      ? 'Looking for receivers...'
+                      : 'Tap a device to connect',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 16.sp,
@@ -187,21 +185,6 @@ class _RadarScanScreenState extends ConsumerState<RadarScanScreen>
                     color: Colors.grey,
                   ),
                 ),
-                // Remove manual "Start Transfer Now" button as it causes duplicate navigation
-                if (hotspotStatus == HotspotStatus.failed || hotspotStatus == HotspotStatus.idle) ...[
-                  SizedBox(height: 20.h),
-                  ElevatedButton.icon(
-                    onPressed: () {
-                      ref.read(discoveryProvider.notifier).startHotspotGroup();
-                    },
-                    icon: const Icon(Icons.refresh),
-                    label: const Text('Try Again'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: theme.primaryColor,
-                      foregroundColor: Colors.white,
-                    ),
-                  ),
-                ],
               ],
             ),
           ),
@@ -216,7 +199,11 @@ class _RadarScanScreenState extends ConsumerState<RadarScanScreen>
                     SizedBox(height: 20.h),
                     const Text(
                       'Client Connecting...',
-                      style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ],
                 ),
