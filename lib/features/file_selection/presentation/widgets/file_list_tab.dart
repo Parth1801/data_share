@@ -64,7 +64,8 @@ class FileListTab extends ConsumerWidget {
         final fileItem = FileItem(
           id: app.packageName,
           name: app.name,
-          sizeMB: 0, // AppInfo doesn't provide size directly
+          path: app.packageName, // Apps don't have a simple single file path for sharing APK usually without extra steps
+          sizeMB: 0,
           type: 'App',
         );
         final isSelected = selectedFiles.any((item) => item.id == fileItem.id);
@@ -103,7 +104,8 @@ class FileListTab extends ConsumerWidget {
         final fileItem = FileItem(
           id: entity.id,
           name: entity.title ?? 'Media ${entity.id}',
-          sizeMB: 0, // AssetEntity size is async
+          path: entity.id, // For AssetEntity, we resolve the real path later using entity.file
+          sizeMB: 0,
           type: type == 'Photos' ? 'Photo' : 'Video',
         );
         final isSelected = selectedFiles.any((item) => item.id == fileItem.id);
@@ -162,6 +164,7 @@ class FileListTab extends ConsumerWidget {
         final fileItem = FileItem(
           id: song.id.toString(),
           name: song.title,
+          path: song.data,
           sizeMB: (song.size / (1024 * 1024)).toDouble(),
           type: 'Music',
         );
@@ -199,7 +202,8 @@ class FileListTab extends ConsumerWidget {
         final fileItem = FileItem(
           id: file.path,
           name: name,
-          sizeMB: 0, // Will be updated async in subtitle but we use 0 for item id consistency
+          path: file.path,
+          sizeMB: 0,
           type: 'File',
         );
         final isSelected = selectedFiles.any((item) => item.id == fileItem.id);

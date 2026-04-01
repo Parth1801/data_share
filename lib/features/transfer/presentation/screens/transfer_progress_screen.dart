@@ -1,41 +1,72 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
+import 'package:datatransfer/features/transfer/providers/transfer_provider.dart';
+import 'package:datatransfer/core/models/file_item.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-class TransferProgressScreen extends StatelessWidget {
+class TransferProgressScreen extends ConsumerWidget {
   const TransferProgressScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final transferState = ref.watch(transferProvider);
+
+    final String titlePrefix = transferState.isSending ? 'Sending' : 'Receiving';
+    final String statusText = transferState.isCompleted 
+        ? '$titlePrefix Complete' 
+        : '$titlePrefix...';
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
       appBar: AppBar(
-        title: const Text('Transferring...'),
+        title: Text(statusText),
         elevation: 0,
         backgroundColor: Colors.transparent,
       ),
       body: Column(
         children: [
-          _buildTransferHeader(context, isDark),
-          Expanded(
-            child: ListView.builder(
-              padding: EdgeInsets.symmetric(horizontal: 20.w, vertical: 20.h),
-              itemCount: 5,
-              itemBuilder: (context, index) {
-                // Mocking first item as downloading, others pending/done
-                double progress = index == 0 ? 0.6 : (index == 1 ? 1.0 : 0.0);
-                return _buildFileTransferItem(context, index, progress, isDark);
-              },
+          if (transferState.error != null)
+            Container(
+              width: double.infinity,
+              padding: EdgeInsets.all(12.w),
+              margin: EdgeInsets.symmetric(horizontal: 20.w, vertical: 10.h),
+              decoration: BoxDecoration(
+                color: Colors.red.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(10.r),
+                border: Border.all(color: Colors.red.withOpacity(0.3)),
+              ),
+              child: Text(
+                transferState.error!,
+                style: TextStyle(color: Colors.red, fontSize: 13.sp),
+              ),
             ),
+          _buildTransferHeader(context, transferState, isDark, titlePrefix),
+          Expanded(
+            child: transferState.files.isEmpty 
+              ? const Center(child: Text('Waiting for files...'))
+              : ListView.builder(
+                  padding: EdgeInsets.symmetric(horizontal: 20.w, vertical: 20.h),
+                  itemCount: transferState.files.length,
+                  itemBuilder: (context, index) {
+                    final file = transferState.files[index];
+                    double progress = 0.0;
+                    if (index < transferState.currentFileIndex) {
+                      progress = 1.0;
+                    } else if (index == transferState.currentFileIndex) {
+                      progress = transferState.currentFileProgress;
+                    }
+                    return _buildFileTransferItem(context, file, index, progress, isDark);
+                  },
+                ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildTransferHeader(BuildContext context, bool isDark) {
+  Widget _buildTransferHeader(BuildContext context, TransferState state, bool isDark, String prefix) {
     return Container(
       padding: EdgeInsets.all(25.w),
       margin: EdgeInsets.all(20.w),
@@ -66,7 +97,7 @@ class TransferProgressScreen extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'To John\'s Phone',
+                    state.isCompleted ? '$prefix Complete' : '$prefix...',
                     style: TextStyle(
                       color: Colors.white,
                       fontSize: 16.sp,
@@ -75,7 +106,7 @@ class TransferProgressScreen extends StatelessWidget {
                   ),
                   SizedBox(height: 5.h),
                   Text(
-                    '5 Files • 250 MB',
+                    '${state.files.length} Files',
                     style: TextStyle(color: Colors.white70, fontSize: 14.sp),
                   ),
                 ],
@@ -87,7 +118,7 @@ class TransferProgressScreen extends StatelessWidget {
                   borderRadius: BorderRadius.circular(20.r),
                 ),
                 child: Text(
-                  '12.5 MB/s',
+                  '${state.speedMBs.toStringAsFixed(1)} MB/s',
                   style: TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.bold,
@@ -99,7 +130,7 @@ class TransferProgressScreen extends StatelessWidget {
           ),
           SizedBox(height: 20.h),
           LinearProgressIndicator(
-            value: 0.4,
+            value: state.overallProgress,
             backgroundColor: Colors.white24,
             valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
             minHeight: 8.h,
@@ -110,11 +141,11 @@ class TransferProgressScreen extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                '100 MB / 250 MB',
+                'Overall Progress',
                 style: TextStyle(color: Colors.white70, fontSize: 12.sp),
               ),
               Text(
-                '40%',
+                '${(state.overallProgress * 100).toInt()}%',
                 style: TextStyle(
                   color: Colors.white,
                   fontSize: 12.sp,
@@ -130,11 +161,12 @@ class TransferProgressScreen extends StatelessWidget {
 
   Widget _buildFileTransferItem(
     BuildContext context,
+    FileItem file,
     int index,
     double progress,
     bool isDark,
   ) {
-    bool isDone = progress == 1.0;
+    bool isDone = progress >= 1.0;
     bool isPending = progress == 0.0;
 
     return Container(
@@ -161,7 +193,7 @@ class TransferProgressScreen extends StatelessWidget {
               borderRadius: BorderRadius.circular(10.r),
             ),
             child: Icon(
-              index % 2 == 0 ? Icons.video_library : Icons.image,
+              file.type == 'Video' ? Icons.video_library : (file.type == 'Photo' ? Icons.image : Icons.insert_drive_file),
               color: Theme.of(context).primaryColor,
             ),
           ),
@@ -171,7 +203,7 @@ class TransferProgressScreen extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Sample File ${index + 1}.mp4',
+                  file.name,
                   style: TextStyle(
                     fontSize: 14.sp,
                     fontWeight: FontWeight.w600,

@@ -1,23 +1,38 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
+import 'dart:math' as math;
 import 'package:flutter_p2p_connection/flutter_p2p_connection.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:datatransfer/features/transfer/providers/transfer_provider.dart';
+import '../../providers/discovery_provider.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'transfer_progress_screen.dart';
 
-class ReceiveScreen extends StatefulWidget {
+class ReceiveScreen extends ConsumerStatefulWidget {
   const ReceiveScreen({super.key});
 
   @override
-  State<ReceiveScreen> createState() => _ReceiveScreenState();
+  ConsumerState<ReceiveScreen> createState() => _ReceiveScreenState();
 }
 
-class _ReceiveScreenState extends State<ReceiveScreen> {
-  bool _isBroadcasting = false;
-  final _host = FlutterP2pConnection();
+class _ReceiveScreenState extends ConsumerState<ReceiveScreen> 
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  bool _protocolStarted = false;
+  // We use discoveryProvider instead of a local _host instance
 
   @override
   void initState() {
     super.initState();
-    _startBroadcasting();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 4),
+    )..repeat();
+    
+    // Start Hotspot to receive
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(discoveryProvider.notifier).startHotspotGroup();
+    });
   }
 
   Future<void> checkAndRequestPermissions() async {
@@ -28,63 +43,249 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
   }
 
   Future<void> checkAndEnableServices() async {
-    if (await _host.checkWifiEnabled() != true) await _host.enableWifiServices();
-    if (await _host.checkLocationEnabled() != true) await _host.enableLocationServices();
+    final p2p = FlutterP2pConnection();
+    if (await p2p.checkWifiEnabled() != true) await p2p.enableWifiServices();
+    if (await p2p.checkLocationEnabled() != true) await p2p.enableLocationServices();
   }
 
-  Future<void> _startBroadcasting() async {
-    await _host.initialize();
-    await _host.register();
-    await checkAndRequestPermissions();
-    await checkAndEnableServices();
-
-    // Create group
-    bool created = await _host.createGroup() ?? false;
-
-    if (created && mounted) {
-      setState(() {
-        _isBroadcasting = true;
-      });
-      print('Group Created & Advertised! Waiting for Sender to connect...');
-    }
-  }
+  // Removed _startDiscovery as it is handled by the provider init or explicit calls
 
   @override
   void dispose() {
-    _host.removeGroup();
-    _host.unregister();
+    _controller.dispose();
+    ref.read(discoveryProvider.notifier).stopScanning();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final discoveryState = ref.watch(discoveryProvider);
+
+    // Listen for discovery status
+    ref.listen(discoveryProvider.select((s) => s.devices), (previous, next) {
+      if (next.isNotEmpty && (previous?.isEmpty ?? true)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Found ${next.length} potential senders!')),
+        );
+      }
+    });
+
+    // Listen for connection (Receiver side now acts as Group Owner)
+    ref.listen(discoveryProvider.select((s) => s.connectionInfo), (previous, next) {
+      if (next?.isConnected == true && next?.isGroupOwner == true && next!.clients.isNotEmpty && !_protocolStarted) {
+        _protocolStarted = true;
+        print('Client connected to Receiver Hotspot! Starting protocol...');
+        
+        final transferNotifier = ref.read(transferProvider.notifier);
+        
+        Future.delayed(const Duration(milliseconds: 1000), () {
+          if (mounted) {
+            // As GO, we bind to our own address (usually 192.168.49.1)
+            final myAddress = next.groupOwnerAddress ?? "192.168.49.1";
+            transferNotifier.startReceiving(myAddress, next.isGroupOwner);
+            
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (context) => const TransferProgressScreen()),
+            );
+          }
+        });
+      }
+    });
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Receive Files'),
         elevation: 0,
         backgroundColor: Colors.transparent,
       ),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            if (_isBroadcasting) ...[
-              const CircularProgressIndicator(),
-              SizedBox(height: 20.h),
-              Text(
-                'Waiting for sender to connect...',
-                style: TextStyle(fontSize: 18.sp, fontWeight: FontWeight.bold),
+      body: Stack(
+        children: [
+          SingleChildScrollView(
+            child: Column(
+              children: [
+                SizedBox(height: 50.h),
+                Text(
+                  'Waiting for Sender',
+                  style: TextStyle(fontSize: 18.sp, fontWeight: FontWeight.bold, color: Colors.green),
+                ),
+                SizedBox(height: 10.h),
+                Text(
+                  'Your hotspot is active. Tell the sender to find you on their radar.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 12.sp, color: Colors.grey),
+                ),
+                SizedBox(height: 20.h),
+                
+                // Radar Section
+                SizedBox(
+                  height: 350.h,
+                  width: 350.w,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      _buildRadarCircle(300.w, 0.1),
+                      _buildRadarCircle(200.w, 0.2),
+                      _buildRadarCircle(100.w, 0.3),
+                      
+                      RotationTransition(
+                        turns: _controller,
+                        child: Container(
+                          width: 300.w,
+                          height: 300.w,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            gradient: SweepGradient(
+                              colors: [
+                                Colors.transparent,
+                                Theme.of(context).primaryColor.withOpacity(0.1),
+                                Theme.of(context).primaryColor.withOpacity(0.5),
+                              ],
+                              stops: const [0.5, 0.8, 1.0],
+                            ),
+                          ),
+                        ),
+                      ),
+                      
+                      // Center Icon (Receiver)
+                      Container(
+                        width: 60.w,
+                        height: 60.w,
+                        decoration: BoxDecoration(
+                          color: Colors.green,
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.green.withOpacity(0.4),
+                              blurRadius: 15,
+                              spreadRadius: 5,
+                            ),
+                          ],
+                        ),
+                        child: const Icon(Icons.download, color: Colors.white, size: 30),
+                      ),
+                      
+                      // Connected Senders on Radar
+                      if (discoveryState.connectionInfo != null)
+                        ...discoveryState.connectionInfo!.clients.asMap().entries.map((entry) {
+                          final int index = entry.key;
+                          final client = entry.value;
+                          final double radius = (index % 2 == 0) ? 100.w : 130.w; 
+                          final double angle = (index * 72) * (math.pi / 180);
+                          
+                          return Positioned(
+                            left: 175.w + radius * math.cos(angle) - 25.w,
+                            top: 175.w + radius * math.sin(angle) - 25.w,
+                            child: _buildDeviceIcon(client.deviceName, Colors.green),
+                          );
+                        }),
+                    ],
+                  ),
+                ),
+                
+                SizedBox(height: 30.h),
+                Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 20.w),
+                  child: _buildDeviceList(),
+                ),
+                SizedBox(height: 50.h),
+              ],
+            ),
+          ),
+          if (discoveryState.isConnecting)
+            Container(
+              color: Colors.black54,
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const CircularProgressIndicator(color: Colors.white),
+                    SizedBox(height: 20.h),
+                    const Text(
+                      'Connecting to Sender...',
+                      style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
               ),
-              SizedBox(height: 10.h),
-              Text(
-                'Make sure both devices are on the same WiFi.',
-                style: TextStyle(fontSize: 14.sp, color: Colors.grey),
-              ),
-            ] else
-              const CircularProgressIndicator(), // Loading while setting up NSD
-          ],
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDeviceList() {
+    final discoveryState = ref.watch(discoveryProvider);
+    
+    if (discoveryState.connectionInfo?.clients.isEmpty ?? true) {
+      return Column(
+        children: [
+          const CircularProgressIndicator(color: Colors.green),
+          SizedBox(height: 10.h),
+          const Text('Waiting for someone to connect...', style: TextStyle(color: Colors.grey)),
+        ],
+      );
+    }
+
+    return Column(
+      children: discoveryState.connectionInfo!.clients.map((client) {
+        return Card(
+          margin: EdgeInsets.only(bottom: 10.h),
+          child: ListTile(
+            leading: const Icon(Icons.person, color: Colors.green),
+            title: Text(client.deviceName),
+            subtitle: Text(client.deviceAddress),
+            trailing: const Icon(Icons.check_circle, color: Colors.green),
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildRadarCircle(double size, double opacity) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(
+          color: Theme.of(context).primaryColor.withOpacity(opacity),
+          width: 1,
         ),
       ),
+    );
+  }
+
+  Widget _buildDeviceIcon(String name, Color color) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 50.w,
+          height: 50.w,
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+            boxShadow: [
+              BoxShadow(
+                color: color.withOpacity(0.3),
+                blurRadius: 8,
+                spreadRadius: 2,
+              ),
+            ],
+          ),
+          child: const Icon(Icons.phone_android, color: Colors.white, size: 24),
+        ),
+        SizedBox(height: 4.h),
+        Text(
+          name.split(' ').first,
+          style: TextStyle(
+            fontSize: 10.sp,
+            fontWeight: FontWeight.bold,
+            color: color,
+          ),
+        ),
+      ],
     );
   }
 }
