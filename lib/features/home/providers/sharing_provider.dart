@@ -4,6 +4,7 @@ import 'package:datatransfer/core/models/file_item.dart';
 import 'package:datatransfer/features/file_selection/providers/selected_files_provider.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class SharingIntentNotifier extends Notifier<List<FileItem>?> {
   @override
@@ -23,29 +24,49 @@ final sharingServiceProvider = Provider((ref) => SharingService(ref));
 class SharingService {
   final Ref _ref;
   StreamSubscription? _intentDataStreamSubscription;
+  bool _processedInitial = false;
 
   SharingService(this._ref);
 
   void init() {
     // For sharing images coming from outside the app while the app is in the memory
     _intentDataStreamSubscription = ReceiveSharingIntent.instance.getMediaStream().listen((List<SharedMediaFile> value) {
-      _handleSharedMedia(value);
+      _handleSharedMedia(value, isInitial: false);
     }, onError: (err) {
       print("getIntentDataStream error: $err");
     });
 
     // For sharing images coming from outside the app while the app is closed
-    ReceiveSharingIntent.instance.getInitialMedia().then((List<SharedMediaFile> value) {
-      _handleSharedMedia(value);
-    });
+    if (!_processedInitial) {
+      ReceiveSharingIntent.instance.getInitialMedia().then((List<SharedMediaFile> value) {
+        if (value.isNotEmpty) {
+          _processedInitial = true;
+          _handleSharedMedia(value, isInitial: true);
+        }
+      });
+    }
   }
 
   void dispose() {
     _intentDataStreamSubscription?.cancel();
   }
 
-  Future<void> _handleSharedMedia(List<SharedMediaFile> files) async {
+  Future<void> _handleSharedMedia(List<SharedMediaFile> files, {required bool isInitial}) async {
     if (files.isEmpty) return;
+
+    final paths = files.map((f) => f.path).join('|');
+    final prefs = await SharedPreferences.getInstance();
+    
+    if (isInitial) {
+      final lastIntent = prefs.getString('last_handled_intent');
+      if (lastIntent == paths) {
+        print("SharingService: Skipping already handled initial intent.");
+        return;
+      }
+    }
+    
+    // Track this intent as handled
+    await prefs.setString('last_handled_intent', paths);
 
     final List<FileItem> fileItems = [];
     for (final file in files) {

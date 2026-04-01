@@ -78,15 +78,19 @@ class DiscoveryNotifier extends StateNotifier<DiscoveryState> {
   }
 
   void _triggerHandshake(WifiP2PInfo info) {
-    if (_isSender) {
+    // Only trigger if we have explicitly entered a role AND a group is formed
+    if (!info.groupFormed) return;
+    
+    if (_isSender && !_handshakeTriggered) {
       _handshakeTriggered = true;
-      // Clear the connecting overlay when group is formed
       state = state.copyWith(
         handshakeRole: HandshakeRole.sending,
         isConnecting: false,
       );
-    } else if (_isReceiver) {
+    } else if (_isReceiver && !_handshakeTriggered) {
+      // Receiver needs at least one client to be present if it's the GO
       if (info.isGroupOwner && info.clients.isEmpty) return;
+      
       _handshakeTriggered = true;
       state = state.copyWith(
         handshakeRole: HandshakeRole.receiving,
@@ -145,26 +149,28 @@ class DiscoveryNotifier extends StateNotifier<DiscoveryState> {
 
   /// RECEIVER: creates a Wi-Fi Direct group (becomes Group Owner)
   Future<bool> startHotspotGroup() async {
-    _isReceiver = true;
-    _isSender = false;
-    _handshakeTriggered = false;
     state = state.copyWith(
       hotspotStatus: HotspotStatus.initializing,
       handshakeRole: HandshakeRole.idle,
       isConnecting: false,
       errorMessage: null,
     );
+    
+    // Reset role to idle until we are sure group is cleared
+    _isReceiver = false; 
+    _isSender = false;
+    _handshakeTriggered = false;
 
     await _p2p.initialize();
     await _p2p.register();
     await _ensureServicesAndPermissions();
 
     try {
-      if (state.connectionInfo?.groupFormed == true) {
-        await _p2p.removeGroup();
-        await Future.delayed(const Duration(milliseconds: 800));
-      }
+      await _p2p.removeGroup();
+      await Future.delayed(const Duration(milliseconds: 800));
     } catch (_) {}
+
+    _isReceiver = true; // NOW set it
 
     try {
       final created = await _p2p.createGroup() ?? false;
@@ -183,9 +189,6 @@ class DiscoveryNotifier extends StateNotifier<DiscoveryState> {
 
   /// SENDER: discovers peers and connects to one
   Future<void> discoverPeers() async {
-    _isSender = true;
-    _isReceiver = false;
-    _handshakeTriggered = false;
     state = state.copyWith(
       isScanning: true,
       isConnecting: false,
@@ -194,13 +197,21 @@ class DiscoveryNotifier extends StateNotifier<DiscoveryState> {
       devices: [],
     );
 
+    // Reset role to idle until we are sure group is cleared
+    _isSender = false;
+    _isReceiver = false;
+    _handshakeTriggered = false;
+
     await _p2p.initialize();
     await _p2p.register();
     await _ensureServicesAndPermissions();
 
     try {
       await _p2p.removeGroup();
+      await Future.delayed(const Duration(milliseconds: 500));
     } catch (_) {}
+
+    _isSender = true; // NOW set it
 
     _peersSubscription?.cancel();
     _peersSubscription = _p2p.streamPeers().listen((peers) {

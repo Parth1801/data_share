@@ -10,11 +10,16 @@ class TransferProgressScreen extends ConsumerWidget {
   const TransferProgressScreen({super.key});
 
   Future<void> _resetAndGoHome(BuildContext context, WidgetRef ref) async {
+    // Clear states first
     ref.read(transferProvider.notifier).reset();
     ref.read(selectedFilesProvider.notifier).clearFiles();
-    await ref.read(discoveryProvider.notifier).fullReset();
+    
+    // Don't await fullReset if it blocks the UI navigation
+    ref.read(discoveryProvider.notifier).fullReset();
+    
     if (context.mounted) {
-      // Pop all the way back to home
+      // Force pop back to home, ignoring PopScope if necessary
+      // Using pushAndRemoveUntil is more reliable here than popUntil if PopScope is strict
       Navigator.of(context).popUntil((route) => route.isFirst);
     }
   }
@@ -28,27 +33,67 @@ class TransferProgressScreen extends ConsumerWidget {
       'TransferProgressScreen: Current State - isSending: ${transferState.isSending}, Files: ${transferState.files.length}',
     );
 
+    final isPaused = transferState.isPaused;
     final String titlePrefix = transferState.isSending
         ? 'Sending'
         : 'Receiving';
-    final String statusText = transferState.isCompleted
+    
+    String statusText = transferState.isCompleted
         ? '$titlePrefix Complete'
         : '$titlePrefix...';
+    if (isPaused) statusText = 'Transfer Paused';
 
-    return Scaffold(
-      backgroundColor: theme.scaffoldBackgroundColor,
-      appBar: AppBar(
-        title: Text(statusText),
-        elevation: 0,
-        backgroundColor: Colors.transparent,
-        leading: IconButton(
-          icon: const Icon(Icons.close),
-          onPressed: () => _resetAndGoHome(context, ref),
+    return PopScope(
+      canPop: transferState.isCompleted || transferState.error != null || isPaused,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        _showExitConfirmation(context, ref);
+      },
+      child: Scaffold(
+        backgroundColor: theme.scaffoldBackgroundColor,
+        appBar: AppBar(
+          title: Text(statusText),
+          elevation: 0,
+          backgroundColor: Colors.transparent,
+          leading: IconButton(
+            icon: const Icon(Icons.close),
+            onPressed: () => _showExitConfirmation(context, ref),
+          ),
+          actions: [
+            if (transferState.isTransferring && transferState.isSending)
+              TextButton.icon(
+                onPressed: () => _showCancelConfirmation(context, ref),
+                icon: const Icon(Icons.delete_forever, color: Colors.red, size: 20),
+                label: const Text('Cancel', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+              ),
+          ],
         ),
-      ),
       body: Column(
         children: [
-          if (transferState.error != null)
+          if (isPaused)
+            Container(
+              width: double.infinity,
+              padding: EdgeInsets.all(12.w),
+              margin: EdgeInsets.symmetric(horizontal: 20.w, vertical: 10.h),
+              decoration: BoxDecoration(
+                color: Colors.orange.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(10.r),
+                border: Border.all(color: Colors.orange.withOpacity(0.3)),
+              ),
+              child: Row(
+                children: [
+                   const Icon(Icons.pause_circle_filled, color: Colors.orange),
+                   SizedBox(width: 10.w),
+                   Expanded(
+                     child: Text(
+                       'Connection lost. Progress has been saved. Reconnect to resume.',
+                       style: TextStyle(color: Colors.orange[800], fontSize: 13.sp),
+                     ),
+                   ),
+                ],
+              ),
+            ),
+          if (transferState.error != null && !isPaused)
             Container(
               width: double.infinity,
               padding: EdgeInsets.all(12.w),
@@ -92,15 +137,17 @@ class TransferProgressScreen extends ConsumerWidget {
                   ),
           ),
           // Done / Go Back button shown when transfer completes or errors
-          if (transferState.isCompleted || transferState.error != null)
+          if (transferState.isCompleted || transferState.error != null || isPaused)
             Padding(
               padding: EdgeInsets.fromLTRB(20.w, 0, 20.w, 30.h),
               child: SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  onPressed: () => _resetAndGoHome(context, ref),
+                  onPressed: isPaused 
+                    ? () => Navigator.of(context).popUntil((route) => route.isFirst)
+                    : () => _resetAndGoHome(context, ref),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: theme.primaryColor,
+                    backgroundColor: isPaused ? Colors.orange : theme.primaryColor,
                     foregroundColor: Colors.white,
                     padding: EdgeInsets.symmetric(vertical: 16.h),
                     shape: RoundedRectangleBorder(
@@ -108,7 +155,7 @@ class TransferProgressScreen extends ConsumerWidget {
                     ),
                   ),
                   child: Text(
-                    transferState.isCompleted ? 'Done' : 'Go Back',
+                    transferState.isCompleted ? 'Done' : (isPaused ? 'Exit to Home' : 'Go Back'),
                     style: TextStyle(
                       fontSize: 16.sp,
                       fontWeight: FontWeight.bold,
@@ -117,6 +164,58 @@ class TransferProgressScreen extends ConsumerWidget {
                 ),
               ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showExitConfirmation(BuildContext context, WidgetRef ref) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Exit & Pause?'),
+        content: const Text(
+          'The transfer will be paused and progress saved. You can resume later by selecting the same files.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Stay'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              _resetAndGoHome(context, ref);
+            },
+            child: const Text('Exit & Pause'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showCancelConfirmation(BuildContext context, WidgetRef ref) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete & Cancel?'),
+        content: const Text(
+          'This will PERMANENTLY cancel the transfer and DELETE the partial file from the receiver side. This cannot be resumed.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Keep Transfer'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              ref.read(transferProvider.notifier).cancelTransfer();
+              _resetAndGoHome(context, ref);
+            },
+            child: const Text('Delete & Cancel', style: TextStyle(color: Colors.red)),
+          ),
         ],
       ),
     );
