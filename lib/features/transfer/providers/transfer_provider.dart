@@ -156,7 +156,7 @@ class TransferNotifier extends StateNotifier<TransferState> {
   }
 
   Future<void> _sendFiles(List<FileItem> files) async {
-    const chunkSize = 64 * 1024; // 64 KB
+    const chunkSize = 128 * 1024; // 128 KB for better throughput
 
     for (int i = 0; i < files.length; i++) {
       if (!mounted) break;
@@ -184,7 +184,8 @@ class TransferNotifier extends StateNotifier<TransferState> {
         }),
       );
 
-      await Future.delayed(const Duration(milliseconds: 150));
+      // Brief delay to ensure metadata is processed
+      await Future.delayed(const Duration(milliseconds: 300));
 
       int sent = 0;
       DateTime lastUpdate = DateTime.now();
@@ -192,13 +193,23 @@ class TransferNotifier extends StateNotifier<TransferState> {
 
       await for (final chunk in file.openRead()) {
         if (!mounted) break;
+        
+        // Use chunks directly from openRead as much as possible
+        // but ensure they aren't TOO large for the socket
         for (int offset = 0; offset < chunk.length; offset += chunkSize) {
           final end = (offset + chunkSize).clamp(0, chunk.length);
-          _p2p.sendStringToSocket(base64Encode(chunk.sublist(offset, end)));
-          sent += end - offset;
+          final subChunk = chunk.sublist(offset, end);
+          
+          _p2p.sendStringToSocket(base64Encode(subChunk));
+          sent += subChunk.length;
+
+          // Flow control: Give the socket and GC a breather every few chunks
+          if (sent % (chunkSize * 16) == 0) {
+            await Future.delayed(const Duration(milliseconds: 5));
+          }
 
           final now = DateTime.now();
-          if (now.difference(lastUpdate).inMilliseconds > 300) {
+          if (now.difference(lastUpdate).inMilliseconds > 500) {
             final secs = now.difference(lastUpdate).inMilliseconds / 1000.0;
             final speed = (sent - lastBytes) / (1024 * 1024 * secs);
             final prog = fileSize > 0 ? sent / fileSize : 0.0;
@@ -287,87 +298,99 @@ class TransferNotifier extends StateNotifier<TransferState> {
   void _onReceiverMessage(dynamic data) {
     if (data is! String) return;
 
-    // Try JSON control message first
-    try {
-      final msg = jsonDecode(data);
-      final type = msg['type'] as String?;
+    // Optimisation: Skip JSON decoding for file chunks (which are base64 strings)
+    // and only try it for control messages that start with '{'
+    if (data.startsWith('{')) {
+      try {
+        final msg = jsonDecode(data);
+        final type = msg['type'] as String?;
 
-      if (type == 'meta') {
-        _rxFileIndex = msg['index'] as int;
-        final name = msg['name'] as String;
-        final size = msg['size'] as int;
-        final total = msg['total'] as int;
+        if (type == 'meta') {
+          _rxFileIndex = msg['index'] as int;
+          final name = msg['name'] as String;
+          final size = msg['size'] as int;
+          final total = msg['total'] as int;
 
-        _expectedBytes = size;
-        _receivedBytes = 0;
-        _lastSpeedTime = DateTime.now();
-        _lastSpeedBytes = 0;
+          _expectedBytes = size;
+          _receivedBytes = 0;
+          _lastSpeedTime = DateTime.now();
+          _lastSpeedBytes = 0;
 
-        final item = FileItem(
-          id: name,
-          name: name,
-          sizeMB: size / (1024 * 1024),
-          type: _inferType(name),
-          path: '$_saveDir/$name',
-        );
-
-        final updated = List<FileItem>.from(state.files);
-        if (_rxFileIndex >= updated.length) {
-          updated.add(item);
-        } else {
-          updated[_rxFileIndex] = item;
-        }
-        _rxFiles = updated;
-
-        if (mounted) {
-          state = state.copyWith(
-            files: updated,
-            currentFileIndex: _rxFileIndex,
-            currentFileProgress: 0.0,
-            overallProgress: total > 0 ? _rxFileIndex / total : 0.0,
+          final item = FileItem(
+            id: name,
+            name: name,
+            sizeMB: size / (1024 * 1024),
+            type: _inferType(name),
+            path: '$_saveDir/$name',
           );
+
+          final updated = List<FileItem>.from(state.files);
+          if (_rxFileIndex >= updated.length) {
+            updated.add(item);
+          } else {
+            updated[_rxFileIndex] = item;
+          }
+          _rxFiles = updated;
+
+          if (mounted) {
+            state = state.copyWith(
+              files: updated,
+              currentFileIndex: _rxFileIndex,
+              currentFileProgress: 0.0,
+              overallProgress: total > 0 ? _rxFileIndex / total : 0.0,
+            );
+          }
+
+          _sink?.close();
+          _sink = File('$_saveDir/$name').openWrite();
+          return;
         }
 
-        _sink?.close();
-        _sink = File('$_saveDir/$name').openWrite();
-        return;
-      }
+        if (type == 'done') {
+          final idx = msg['index'] as int;
+          final total = _rxFiles.length;
+          final filePath = '$_saveDir/${_rxFiles[idx].name}';
 
-      if (type == 'done') {
-        final idx = msg['index'] as int;
-        final total = _rxFiles.length;
-        final filePath = '$_saveDir/${_rxFiles[idx].name}';
+          _sink?.close();
+          _sink = null;
 
-        _sink?.close();
-        _sink = null;
+          // Notify Android MediaStore so the file appears in gallery immediately
+          _notifyMediaStore(filePath);
 
-        // Notify Android MediaStore so the file appears in gallery immediately
-        _notifyMediaStore(filePath);
+          // Save to history
+          final savedFile = _rxFiles[idx];
+          _ref.read(historyProvider.notifier).addHistoryItem(HistoryItem(
+            id: savedFile.id,
+            name: savedFile.name,
+            path: savedFile.path,
+            sizeMB: savedFile.sizeMB,
+            type: savedFile.type,
+            timestamp: DateTime.now(),
+            isSent: false,
+          ));
 
-        // Save to history
-        final savedFile = _rxFiles[idx];
-        _ref.read(historyProvider.notifier).addHistoryItem(HistoryItem(
-          id: savedFile.id,
-          name: savedFile.name,
-          path: savedFile.path,
-          sizeMB: savedFile.sizeMB,
-          type: savedFile.type,
-          timestamp: DateTime.now(),
-          isSent: false,
-        ));
+          if (mounted) {
+            state = state.copyWith(
+              currentFileIndex: idx,
+              currentFileProgress: 1.0,
+              overallProgress: total > 0 ? (idx + 1) / total : 1.0,
+              isCompleted: idx == total - 1,
+            );
+          }
+          return;
+        }
 
-        if (mounted) {
+        if (type == 'progress' && mounted) {
           state = state.copyWith(
-            currentFileIndex: idx,
-            currentFileProgress: 1.0,
-            overallProgress: total > 0 ? (idx + 1) / total : 1.0,
-            isCompleted: idx == total - 1,
+            overallProgress: (msg['overall'] as num?)?.toDouble() ?? 0.0,
+            currentFileIndex: msg['current'] ?? 0,
+            speedMBs: (msg['speed'] as num?)?.toDouble() ?? 0.0,
           );
+          return;
         }
-        return;
+      } catch (_) {
+        // Not a valid JSON control message, likely an edge case, fall through to base64
       }
-    } catch (_) {
-      // Not a JSON control message — fall through to base64 chunk handling
     }
 
     // base64-encoded file chunk

@@ -64,6 +64,7 @@ dependencies:
   on_audio_query: ^2.9.0
   disk_space_2: ^1.0.12
   open_filex: ^4.7.0
+  receive_sharing_intent: ^1.8.1
 
 dev_dependencies:
   flutter_test:

@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'home_screen.dart';
 import 'history_screen.dart';
 import 'package:datatransfer/features/home/providers/navigation_provider.dart';
+import 'package:datatransfer/features/home/providers/sharing_provider.dart';
+import 'package:datatransfer/features/transfer/presentation/screens/radar_scan_screen.dart';
 
 class MainNavigationScreen extends ConsumerStatefulWidget {
   const MainNavigationScreen({super.key});
@@ -19,9 +21,34 @@ class _MainNavigationScreenState extends ConsumerState<MainNavigationScreen> {
   ];
 
   @override
+  void initState() {
+    super.initState();
+    // Initialize sharing service
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(sharingServiceProvider).init();
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     final currentIndex = ref.watch(navigationIndexProvider);
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+
+    // Listen for shared files from outside the app
+    ref.listen(sharingIntentProvider, (previous, next) {
+      if (next != null) {
+        // Reset the intent so it doesn't trigger again on rebuild
+        ref.read(sharingIntentProvider.notifier).setFiles(null);
+        
+        // Navigate to RadarScanScreen
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => const RadarScanScreen(),
+          ),
+        );
+      }
+    });
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle(
