@@ -68,7 +68,7 @@ class TransferNotifier extends StateNotifier<TransferState> {
   final _p2p = FlutterP2pConnection();
   static const String _goIp = '192.168.49.1';
   // Public folder — visible to gallery and file manager apps
-  static const String _saveDir = '/storage/emulated/0/Pictures/DataTransfer';
+  static const String _saveDir = '/storage/emulated/0/Download/DataTransfer';
 
   // Receiver-side state
   IOSink? _sink;

@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:installed_apps/app_info.dart';
@@ -150,17 +151,9 @@ class FileListTab extends ConsumerWidget {
       itemCount: apps.length,
       itemBuilder: (context, index) {
         final app = apps[index];
-        // Use apkFilePath for the real APK path on disk
-        final apkPath = app
-            .packageName; // APK path not available via installed_apps; skip for transfer
-        final fileItem = FileItem(
-          id: app.packageName,
-          name: '${app.name}.apk',
-          path: apkPath,
-          sizeMB: 0,
-          type: 'App',
+        final isSelected = selectedFiles.any(
+          (item) => item.id == app.packageName,
         );
-        final isSelected = selectedFiles.any((item) => item.id == fileItem.id);
 
         return ListTile(
           leading: app.icon != null
@@ -185,12 +178,55 @@ class FileListTab extends ConsumerWidget {
                   ? Theme.of(context).primaryColor
                   : Colors.grey.shade400,
             ),
-            onPressed: () => onToggleSelection(fileItem),
+            onPressed: () => _toggleApp(app, ref),
           ),
-          onTap: () => onToggleSelection(fileItem),
+          onTap: () => _toggleApp(app, ref),
         );
       },
     );
+  }
+
+  Future<void> _toggleApp(AppInfo app, WidgetRef ref) async {
+    // If already selected, just deselect
+    final selected = ref.read(selectedFilesProvider);
+    if (selected.any((f) => f.id == app.packageName)) {
+      onToggleSelection(
+        FileItem(
+          id: app.packageName,
+          name: '${app.name}.apk',
+          path: '',
+          sizeMB: 0,
+          type: 'App',
+        ),
+      );
+      return;
+    }
+
+    // Resolve the real APK path via platform channel
+    try {
+      const channel = MethodChannel('datatransfer/apk_path');
+      final apkPath = await channel.invokeMethod<String>('getApkPath', {
+        'packageName': app.packageName,
+      });
+      if (apkPath == null || apkPath.isEmpty) return;
+
+      final file = File(apkPath);
+      final sizeMB = await file.exists()
+          ? (await file.length()) / (1024 * 1024)
+          : 0.0;
+
+      onToggleSelection(
+        FileItem(
+          id: app.packageName,
+          name: '${app.name}.apk',
+          path: apkPath,
+          sizeMB: sizeMB,
+          type: 'App',
+        ),
+      );
+    } catch (_) {
+      // APK path unavailable for this app
+    }
   }
 
   Widget _buildMediaGrid(

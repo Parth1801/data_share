@@ -151,6 +151,7 @@ class DiscoveryNotifier extends StateNotifier<DiscoveryState> {
     state = state.copyWith(
       hotspotStatus: HotspotStatus.initializing,
       handshakeRole: HandshakeRole.idle,
+      isConnecting: false,
       errorMessage: null,
     );
 
@@ -187,6 +188,7 @@ class DiscoveryNotifier extends StateNotifier<DiscoveryState> {
     _handshakeTriggered = false;
     state = state.copyWith(
       isScanning: true,
+      isConnecting: false,
       handshakeRole: HandshakeRole.idle,
       errorMessage: null,
       devices: [],

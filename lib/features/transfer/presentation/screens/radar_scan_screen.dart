@@ -39,6 +39,9 @@ class _RadarScanScreenState extends ConsumerState<RadarScanScreen>
   void dispose() {
     _controller.dispose();
     _protocolTimer?.cancel();
+    if (!_navigated) {
+      ref.read(discoveryProvider.notifier).stopScanning();
+    }
     super.dispose();
   }
 

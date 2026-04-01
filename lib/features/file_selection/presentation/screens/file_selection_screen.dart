@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import '../../../transfer/presentation/screens/radar_scan_screen.dart';
 import '../widgets/file_list_tab.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'dart:io';
 
 class FileSelectionScreen extends ConsumerStatefulWidget {
   const FileSelectionScreen({super.key});
@@ -144,7 +146,24 @@ class _FileSelectionScreenState extends ConsumerState<FileSelectionScreen>
             ],
           ),
           ElevatedButton(
-            onPressed: () {
+            onPressed: () async {
+              if (Platform.isAndroid) {
+                // Request All Files Access for APK and other restricted files on Android 11+
+                if (!await Permission.manageExternalStorage.isGranted) {
+                  final status = await Permission.manageExternalStorage.request();
+                  if (!status.isGranted) {
+                    // Show a snackbar explaining why it's needed
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('All Files Access is required to transfer APKs and other files.'),
+                        backgroundColor: Colors.orange,
+                      ),
+                    );
+                    return;
+                  }
+                }
+              }
+
               Navigator.push(
                 context,
                 MaterialPageRoute(
