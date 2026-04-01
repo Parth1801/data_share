@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/services.dart';
 import 'package:flutter_p2p_connection/flutter_p2p_connection.dart';
 import 'package:flutter_riverpod/legacy.dart';
-import 'package:path_provider/path_provider.dart';
 import '../../../../core/models/file_item.dart';
 
 class TransferState {
@@ -52,44 +52,45 @@ class TransferState {
   }
 }
 
-// Protocol message types sent over the WebSocket
-// SENDER → RECEIVER: {"type":"meta","index":0,"name":"file.jpg","size":12345}
-// SENDER → RECEIVER: binary bytes (raw file chunks)
-// SENDER → RECEIVER: {"type":"done","index":0}
-// RECEIVER → SENDER: {"type":"ready"}   (receiver is connected and waiting)
-// RECEIVER → SENDER: {"type":"next"}    (ready for next file)
+// Wire protocol (all messages are strings over the WebSocket):
+//   SENDER → RECEIVER: JSON {"type":"meta","index":0,"name":"x.jpg","size":1234,"total":3}
+//   SENDER → RECEIVER: base64-encoded file chunk strings
+//   SENDER → RECEIVER: JSON {"type":"done","index":0}
+//   RECEIVER → SENDER: JSON {"type":"ready"}
+//   RECEIVER → SENDER: JSON {"type":"progress","overall":0.5,"current":0,"speed":1.2}
 
 class TransferNotifier extends StateNotifier<TransferState> {
   TransferNotifier() : super(TransferState(files: []));
 
   final _p2p = FlutterP2pConnection();
   static const String _goIp = '192.168.49.1';
+  // Public folder — visible to gallery and file manager apps
+  static const String _saveDir = '/storage/emulated/0/Pictures/DataTransfer';
 
-  // Used on receiver side to accumulate incoming file bytes
-  IOSink? _currentSink;
+  // Receiver-side state
+  IOSink? _sink;
   int _expectedBytes = 0;
   int _receivedBytes = 0;
-  int _currentFileIndex = 0;
-  List<FileItem> _receiverFiles = [];
-  String _savePath = '';
-  DateTime _lastSpeedUpdate = DateTime.now();
+  int _rxFileIndex = 0;
+  List<FileItem> _rxFiles = [];
+  DateTime _lastSpeedTime = DateTime.now();
   int _lastSpeedBytes = 0;
 
   void reset() {
     _p2p.closeSocket();
-    _currentSink?.close();
-    _currentSink = null;
+    _sink?.close();
+    _sink = null;
     state = TransferState(files: []);
   }
 
   @override
   void dispose() {
     _p2p.closeSocket();
-    _currentSink?.close();
+    _sink?.close();
     super.dispose();
   }
 
-  // ─── SENDER ────────────────────────────────────────────────────────────────
+  // ── SENDER ─────────────────────────────────────────────────────────────────
 
   Future<void> startSending(
     List<FileItem> files,
@@ -100,43 +101,19 @@ class TransferNotifier extends StateNotifier<TransferState> {
 
     final readyCompleter = Completer<void>();
 
-    void onConnect(String address) {
-      // Socket connected — wait for receiver's "ready" signal before sending
-    }
-
-    void onRequest(dynamic data) {
-      if (data is String) {
-        try {
-          final msg = jsonDecode(data);
-          if (msg['type'] == 'ready' && !readyCompleter.isCompleted) {
-            readyCompleter.complete();
-          }
-          if (msg['type'] == 'progress' && mounted) {
-            state = state.copyWith(
-              overallProgress: (msg['overall'] as num?)?.toDouble() ?? 0.0,
-              currentFileIndex: msg['current'] ?? 0,
-              speedMBs: (msg['speed'] as num?)?.toDouble() ?? 0.0,
-            );
-          }
-        } catch (_) {}
-      }
-    }
-
     bool connected = false;
     if (isGroupOwner) {
-      // Sender is GO: bind socket server, receiver will connect to us
       connected = await _p2p.startSocket(
         groupOwnerAddress: _goIp,
-        onConnect: onConnect,
-        onRequest: onRequest,
+        onConnect: (_) {},
+        onRequest: (data) => _onSenderMessage(data, readyCompleter),
       );
     } else {
-      // Sender is client: connect to GO's socket
-      for (int attempt = 0; attempt < 8 && !connected; attempt++) {
+      for (int i = 0; i < 8 && !connected; i++) {
         connected = await _p2p.connectToSocket(
           groupOwnerAddress: _goIp,
-          onConnect: onConnect,
-          onRequest: onRequest,
+          onConnect: (_) {},
+          onRequest: (data) => _onSenderMessage(data, readyCompleter),
         );
         if (!connected) await Future.delayed(const Duration(seconds: 2));
       }
@@ -148,7 +125,6 @@ class TransferNotifier extends StateNotifier<TransferState> {
       return;
     }
 
-    // Wait for receiver to signal ready (max 30s)
     try {
       await readyCompleter.future.timeout(const Duration(seconds: 30));
     } on TimeoutException {
@@ -157,22 +133,37 @@ class TransferNotifier extends StateNotifier<TransferState> {
       return;
     }
 
-    // Send files one by one over the socket
-    await _sendFilesOverSocket(files);
+    await _sendFiles(files);
   }
 
-  Future<void> _sendFilesOverSocket(List<FileItem> files) async {
-    const int chunkSize = 64 * 1024; // 64 KB chunks
+  void _onSenderMessage(dynamic data, Completer<void> readyCompleter) {
+    if (data is! String) return;
+    try {
+      final msg = jsonDecode(data);
+      if (msg['type'] == 'ready' && !readyCompleter.isCompleted) {
+        readyCompleter.complete();
+      } else if (msg['type'] == 'progress' && mounted) {
+        state = state.copyWith(
+          overallProgress: (msg['overall'] as num?)?.toDouble() ?? 0.0,
+          currentFileIndex: msg['current'] ?? 0,
+          speedMBs: (msg['speed'] as num?)?.toDouble() ?? 0.0,
+        );
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _sendFiles(List<FileItem> files) async {
+    const chunkSize = 64 * 1024; // 64 KB
 
     for (int i = 0; i < files.length; i++) {
       if (!mounted) break;
-      final fileItem = files[i];
-      final file = File(fileItem.path);
+      final item = files[i];
+      final file = File(item.path);
 
-      if (!await file.exists()) {
+      if (item.path.isEmpty || !await file.exists()) {
         if (mounted) {
           state = state.copyWith(
-            error: 'File not found: ${fileItem.name}\nPath: "${fileItem.path}"',
+            error: 'File not found: ${item.name}\nPath: "${item.path}"',
           );
         }
         return;
@@ -180,44 +171,39 @@ class TransferNotifier extends StateNotifier<TransferState> {
 
       final fileSize = await file.length();
 
-      // Send metadata header
       _p2p.sendStringToSocket(
         jsonEncode({
           'type': 'meta',
           'index': i,
-          'name': fileItem.name,
+          'name': item.name,
           'size': fileSize,
           'total': files.length,
         }),
       );
 
-      // Small delay to ensure metadata arrives before binary data
-      await Future.delayed(const Duration(milliseconds: 100));
+      await Future.delayed(const Duration(milliseconds: 150));
 
-      // Stream file bytes in chunks
       int sent = 0;
       DateTime lastUpdate = DateTime.now();
       int lastBytes = 0;
 
       await for (final chunk in file.openRead()) {
         if (!mounted) break;
-        // Send in fixed-size chunks to avoid overwhelming the socket
         for (int offset = 0; offset < chunk.length; offset += chunkSize) {
           final end = (offset + chunkSize).clamp(0, chunk.length);
-          final slice = chunk.sublist(offset, end);
-          _p2p.sendStringToSocket(base64Encode(slice));
-          sent += slice.length;
+          _p2p.sendStringToSocket(base64Encode(chunk.sublist(offset, end)));
+          sent += end - offset;
 
           final now = DateTime.now();
           if (now.difference(lastUpdate).inMilliseconds > 300) {
             final secs = now.difference(lastUpdate).inMilliseconds / 1000.0;
             final speed = (sent - lastBytes) / (1024 * 1024 * secs);
-            final fileProg = fileSize > 0 ? sent / fileSize : 0.0;
+            final prog = fileSize > 0 ? sent / fileSize : 0.0;
             if (mounted) {
               state = state.copyWith(
                 currentFileIndex: i,
-                currentFileProgress: fileProg,
-                overallProgress: (i + fileProg) / files.length,
+                currentFileProgress: prog,
+                overallProgress: (i + prog) / files.length,
                 speedMBs: speed,
               );
             }
@@ -227,7 +213,6 @@ class TransferNotifier extends StateNotifier<TransferState> {
         }
       }
 
-      // Signal end of this file
       _p2p.sendStringToSocket(jsonEncode({'type': 'done', 'index': i}));
 
       if (mounted) {
@@ -238,7 +223,6 @@ class TransferNotifier extends StateNotifier<TransferState> {
         );
       }
 
-      // Wait a bit between files
       await Future.delayed(const Duration(milliseconds: 200));
     }
 
@@ -246,7 +230,7 @@ class TransferNotifier extends StateNotifier<TransferState> {
       state = state.copyWith(isCompleted: true, overallProgress: 1.0);
   }
 
-  // ─── RECEIVER ──────────────────────────────────────────────────────────────
+  // ── RECEIVER ───────────────────────────────────────────────────────────────
 
   Future<void> startReceiving(
     String groupOwnerAddress,
@@ -254,40 +238,28 @@ class TransferNotifier extends StateNotifier<TransferState> {
   ) async {
     state = TransferState(files: [], isSending: false);
 
-    final Directory? dir = await getExternalStorageDirectory();
-    _savePath = '${dir?.path}/DataTransfer';
-    await Directory(_savePath).create(recursive: true);
-
-    _currentFileIndex = 0;
-    _receiverFiles = [];
-    _currentSink = null;
+    await Directory(_saveDir).create(recursive: true);
+    _rxFileIndex = 0;
+    _rxFiles = [];
+    _sink = null;
     _expectedBytes = 0;
     _receivedBytes = 0;
 
-    void onConnect(String address) {
-      // Signal sender that we're ready to receive
-      _p2p.sendStringToSocket(jsonEncode({'type': 'ready'}));
-    }
-
-    void onRequest(dynamic data) {
-      _handleReceiverData(data);
-    }
-
     bool connected = false;
     if (isGroupOwner) {
-      // Receiver is GO: bind socket server
       connected = await _p2p.startSocket(
         groupOwnerAddress: _goIp,
-        onConnect: onConnect,
-        onRequest: onRequest,
+        onConnect: (_) =>
+            _p2p.sendStringToSocket(jsonEncode({'type': 'ready'})),
+        onRequest: (data) => _onReceiverMessage(data),
       );
     } else {
-      // Receiver is client: connect to GO's socket
-      for (int attempt = 0; attempt < 8 && !connected; attempt++) {
+      for (int i = 0; i < 8 && !connected; i++) {
         connected = await _p2p.connectToSocket(
           groupOwnerAddress: _goIp,
-          onConnect: onConnect,
-          onRequest: onRequest,
+          onConnect: (_) =>
+              _p2p.sendStringToSocket(jsonEncode({'type': 'ready'})),
+          onRequest: (data) => _onReceiverMessage(data),
         );
         if (!connected) await Future.delayed(const Duration(seconds: 2));
       }
@@ -298,116 +270,121 @@ class TransferNotifier extends StateNotifier<TransferState> {
     }
   }
 
-  void _handleReceiverData(dynamic data) {
-    if (data is String) {
-      // Try to parse as JSON control message first
-      try {
-        final msg = jsonDecode(data);
-        final type = msg['type'] as String?;
+  void _onReceiverMessage(dynamic data) {
+    if (data is! String) return;
 
-        if (type == 'meta') {
-          // New file incoming
-          _currentFileIndex = msg['index'] as int;
-          final name = msg['name'] as String;
-          final size = msg['size'] as int;
-          final total = msg['total'] as int;
+    // Try JSON control message first
+    try {
+      final msg = jsonDecode(data);
+      final type = msg['type'] as String?;
 
-          _expectedBytes = size;
-          _receivedBytes = 0;
-          _lastSpeedUpdate = DateTime.now();
-          _lastSpeedBytes = 0;
+      if (type == 'meta') {
+        _rxFileIndex = msg['index'] as int;
+        final name = msg['name'] as String;
+        final size = msg['size'] as int;
+        final total = msg['total'] as int;
 
-          final fileItem = FileItem(
-            id: name,
-            name: name,
-            sizeMB: size / (1024 * 1024),
-            type: _inferType(name),
-            path: '$_savePath/$name',
-          );
+        _expectedBytes = size;
+        _receivedBytes = 0;
+        _lastSpeedTime = DateTime.now();
+        _lastSpeedBytes = 0;
 
-          // Add to file list if not already there
-          final existing = List<FileItem>.from(state.files);
-          if (_currentFileIndex >= existing.length) {
-            existing.add(fileItem);
-          } else {
-            existing[_currentFileIndex] = fileItem;
-          }
-          _receiverFiles = existing;
+        final item = FileItem(
+          id: name,
+          name: name,
+          sizeMB: size / (1024 * 1024),
+          type: _inferType(name),
+          path: '$_saveDir/$name',
+        );
 
-          if (mounted) {
-            state = state.copyWith(
-              files: existing,
-              currentFileIndex: _currentFileIndex,
-              currentFileProgress: 0.0,
-              overallProgress: _currentFileIndex / total,
-            );
-          }
-
-          // Open file for writing
-          _currentSink?.close();
-          _currentSink = File('$_savePath/$name').openWrite();
-        } else if (type == 'done') {
-          // File transfer complete
-          _currentSink?.close();
-          _currentSink = null;
-          final total = _receiverFiles.length;
-          final idx = msg['index'] as int;
-
-          if (mounted) {
-            state = state.copyWith(
-              currentFileIndex: idx,
-              currentFileProgress: 1.0,
-              overallProgress: (idx + 1) / total,
-              isCompleted: idx == total - 1,
-            );
-          }
+        final updated = List<FileItem>.from(state.files);
+        if (_rxFileIndex >= updated.length) {
+          updated.add(item);
+        } else {
+          updated[_rxFileIndex] = item;
         }
+        _rxFiles = updated;
+
+        if (mounted) {
+          state = state.copyWith(
+            files: updated,
+            currentFileIndex: _rxFileIndex,
+            currentFileProgress: 0.0,
+            overallProgress: total > 0 ? _rxFileIndex / total : 0.0,
+          );
+        }
+
+        _sink?.close();
+        _sink = File('$_saveDir/$name').openWrite();
         return;
-      } catch (_) {
-        // Not JSON — it's a base64-encoded file chunk
       }
 
-      // Decode base64 chunk and write to file
-      try {
-        final bytes = base64Decode(data);
-        _currentSink?.add(bytes);
-        _receivedBytes += bytes.length;
+      if (type == 'done') {
+        final idx = msg['index'] as int;
+        final total = _rxFiles.length;
+        final filePath = '$_saveDir/${_rxFiles[idx].name}';
 
-        final now = DateTime.now();
-        if (now.difference(_lastSpeedUpdate).inMilliseconds > 300) {
-          final secs = now.difference(_lastSpeedUpdate).inMilliseconds / 1000.0;
-          final speed =
-              (_receivedBytes - _lastSpeedBytes) / (1024 * 1024 * secs);
-          final fileProg = _expectedBytes > 0
-              ? _receivedBytes / _expectedBytes
-              : 0.0;
-          final total = _receiverFiles.length;
+        _sink?.close();
+        _sink = null;
 
-          if (mounted) {
-            state = state.copyWith(
-              currentFileProgress: fileProg,
-              overallProgress: total > 0
-                  ? (_currentFileIndex + fileProg) / total
-                  : 0.0,
-              speedMBs: speed,
-            );
-            // Report progress back to sender
-            _p2p.sendStringToSocket(
-              jsonEncode({
-                'type': 'progress',
-                'overall': total > 0
-                    ? (_currentFileIndex + fileProg) / total
-                    : 0.0,
-                'current': _currentFileIndex,
-                'speed': speed,
-              }),
-            );
-          }
-          _lastSpeedUpdate = now;
-          _lastSpeedBytes = _receivedBytes;
+        // Notify Android MediaStore so the file appears in gallery immediately
+        _notifyMediaStore(filePath);
+
+        if (mounted) {
+          state = state.copyWith(
+            currentFileIndex: idx,
+            currentFileProgress: 1.0,
+            overallProgress: total > 0 ? (idx + 1) / total : 1.0,
+            isCompleted: idx == total - 1,
+          );
         }
-      } catch (_) {}
+        return;
+      }
+    } catch (_) {
+      // Not a JSON control message — fall through to base64 chunk handling
     }
+
+    // base64-encoded file chunk
+    try {
+      final bytes = base64Decode(data);
+      _sink?.add(bytes);
+      _receivedBytes += bytes.length;
+
+      final now = DateTime.now();
+      if (now.difference(_lastSpeedTime).inMilliseconds > 300) {
+        final secs = now.difference(_lastSpeedTime).inMilliseconds / 1000.0;
+        final speed = (_receivedBytes - _lastSpeedBytes) / (1024 * 1024 * secs);
+        final prog = _expectedBytes > 0 ? _receivedBytes / _expectedBytes : 0.0;
+        final total = _rxFiles.length;
+
+        if (mounted) {
+          state = state.copyWith(
+            currentFileProgress: prog,
+            overallProgress: total > 0 ? (_rxFileIndex + prog) / total : 0.0,
+            speedMBs: speed,
+          );
+          _p2p.sendStringToSocket(
+            jsonEncode({
+              'type': 'progress',
+              'overall': total > 0 ? (_rxFileIndex + prog) / total : 0.0,
+              'current': _rxFileIndex,
+              'speed': speed,
+            }),
+          );
+        }
+        _lastSpeedTime = now;
+        _lastSpeedBytes = _receivedBytes;
+      }
+    } catch (_) {}
+  }
+
+  /// Triggers Android's MediaScannerConnection so the file appears in gallery/Files
+  void _notifyMediaStore(String filePath) {
+    try {
+      const MethodChannel(
+        'datatransfer/media_scanner',
+      ).invokeMethod<void>('scanFile', {'path': filePath});
+    } catch (_) {}
   }
 
   String _inferType(String fileName) {
