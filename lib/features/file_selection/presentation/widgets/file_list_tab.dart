@@ -156,7 +156,7 @@ class FileListTab extends ConsumerWidget {
         );
 
         return ListTile(
-          leading: app.icon != null
+          leading: (app.icon != null && app.icon!.isNotEmpty)
               ? Image.memory(app.icon!, width: 45.w, height: 45.w)
               : Icon(
                   Icons.android,
@@ -286,7 +286,8 @@ class FileListTab extends ConsumerWidget {
                     ),
                     builder: (context, snapshot) {
                       if (snapshot.connectionState == ConnectionState.done &&
-                          snapshot.data != null) {
+                          snapshot.data != null &&
+                          snapshot.data!.isNotEmpty) {
                         return Image.memory(snapshot.data!, fit: BoxFit.cover);
                       }
                       return Icon(

@@ -1,7 +1,9 @@
 import 'package:datatransfer/features/file_selection/presentation/screens/file_selection_screen.dart';
 import 'package:datatransfer/features/home/providers/history_provider.dart';
 import 'package:datatransfer/features/home/providers/storage_provider.dart';
+import 'package:datatransfer/features/home/providers/device_info_provider.dart';
 import 'package:datatransfer/features/transfer/presentation/screens/receive_screen.dart';
+import 'package:datatransfer/features/home/providers/navigation_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
@@ -24,7 +26,7 @@ class HomeScreen extends ConsumerWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _buildHeader(context),
+              _buildHeader(context, ref),
               SizedBox(height: 20.h),
               storageInfo.maybeWhen(
                 data: (info) => _buildStorageInfoCard(context, isDark, info),
@@ -33,7 +35,7 @@ class HomeScreen extends ConsumerWidget {
               SizedBox(height: 30.h),
               _buildActionButtons(context),
               SizedBox(height: 30.h),
-              _buildRecentFiles(context, isDark, history),
+              _buildRecentFiles(context, ref, isDark, history),
             ],
           ),
         ),
@@ -41,7 +43,9 @@ class HomeScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildHeader(BuildContext context) {
+  Widget _buildHeader(BuildContext context, WidgetRef ref) {
+    final deviceName = ref.watch(deviceNameProvider);
+
     return Padding(
       padding: EdgeInsets.symmetric(horizontal: 20.w, vertical: 10.h),
       child: Row(
@@ -49,32 +53,49 @@ class HomeScreen extends ConsumerWidget {
         children: [
           Row(
             children: [
-              CircleAvatar(
-                radius: 20.r,
-                backgroundColor: Theme.of(
-                  context,
-                ).primaryColor.withOpacity(0.2),
-                child: Icon(
-                  Icons.person,
-                  color: Theme.of(context).primaryColor,
+              // CircleAvatar(
+              //   radius: 20.r,
+              //   backgroundColor: Theme.of(
+              //     context,
+              //   ).primaryColor.withOpacity(0.2),
+              //   child: Icon(
+              //     Icons.person,
+              //     color: Theme.of(context).primaryColor,
+              //   ),
+              // ),
+              SizedBox(width: 12.w),
+              deviceName.when(
+                data: (name) => Text(
+                  name,
+                  style: TextStyle(
+                    fontSize: 18.sp,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                loading: () => const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                error: (_, __) => Text(
+                  'My Device',
+                  style: TextStyle(
+                    fontSize: 18.sp,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
-              SizedBox(width: 12.w),
-              Text(
-                'Parth',
-                style: TextStyle(fontSize: 18.sp, fontWeight: FontWeight.bold),
-              ),
             ],
           ),
-          Row(
-            children: [
-              IconButton(
-                icon: const Icon(Icons.qr_code_scanner),
-                onPressed: () {},
-              ),
-              IconButton(icon: const Icon(Icons.computer), onPressed: () {}),
-            ],
-          ),
+          // Row(
+          //   children: [
+          //     IconButton(
+          //       icon: const Icon(Icons.qr_code_scanner),
+          //       onPressed: () {},
+          //     ),
+          //     IconButton(icon: const Icon(Icons.computer), onPressed: () {}),
+          //   ],
+          // ),
         ],
       ),
     );
@@ -169,7 +190,6 @@ class HomeScreen extends ConsumerWidget {
           Expanded(
             child: GestureDetector(
               onTap: () {
-                // Navigate to radar/receive screen later
                 Navigator.push(
                   context,
                   MaterialPageRoute(
@@ -245,6 +265,7 @@ class HomeScreen extends ConsumerWidget {
 
   Widget _buildRecentFiles(
     BuildContext context,
+    WidgetRef ref,
     bool isDark,
     List<dynamic> history,
   ) {
@@ -261,12 +282,17 @@ class HomeScreen extends ConsumerWidget {
                 style: TextStyle(fontSize: 18.sp, fontWeight: FontWeight.bold),
               ),
               if (history.isNotEmpty)
-                Text(
-                  'View All',
-                  style: TextStyle(
-                    fontSize: 14.sp,
-                    color: Theme.of(context).primaryColor,
-                    fontWeight: FontWeight.w600,
+                GestureDetector(
+                  onTap: () {
+                    ref.read(navigationIndexProvider.notifier).state = 1;
+                  },
+                  child: Text(
+                    'View All',
+                    style: TextStyle(
+                      fontSize: 14.sp,
+                      color: Theme.of(context).primaryColor,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
             ],
@@ -300,7 +326,9 @@ class HomeScreen extends ConsumerWidget {
                     width: 100.w,
                     margin: EdgeInsets.symmetric(horizontal: 5.w),
                     decoration: BoxDecoration(
-                      color: isDark ? const Color(0xFF1E1E1E) : Colors.grey.shade100,
+                      color: isDark
+                          ? const Color(0xFF1E1E1E)
+                          : Colors.grey.shade100,
                       borderRadius: BorderRadius.circular(16.r),
                     ),
                     child: Column(
@@ -316,7 +344,12 @@ class HomeScreen extends ConsumerWidget {
                           padding: EdgeInsets.symmetric(horizontal: 8.w),
                           child: Text(
                             item.name,
-                            style: TextStyle(fontSize: 12.sp, color: isDark ? Colors.white70 : Colors.grey.shade800),
+                            style: TextStyle(
+                              fontSize: 12.sp,
+                              color: isDark
+                                  ? Colors.white70
+                                  : Colors.grey.shade800,
+                            ),
                             overflow: TextOverflow.ellipsis,
                             textAlign: TextAlign.center,
                           ),
