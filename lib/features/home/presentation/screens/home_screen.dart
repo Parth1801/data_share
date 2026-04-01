@@ -1,15 +1,18 @@
 import 'package:datatransfer/features/file_selection/presentation/screens/file_selection_screen.dart';
+import 'package:datatransfer/features/home/providers/storage_provider.dart';
 import 'package:datatransfer/features/transfer/presentation/screens/receive_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final storageInfo = ref.watch(storageProvider);
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
@@ -20,7 +23,10 @@ class HomeScreen extends StatelessWidget {
             children: [
               _buildHeader(context),
               SizedBox(height: 20.h),
-              _buildStorageInfoCard(context, isDark),
+              storageInfo.maybeWhen(
+                data: (info) => _buildStorageInfoCard(context, isDark, info),
+                orElse: () => _buildStorageInfoCard(context, isDark, null),
+              ),
               SizedBox(height: 30.h),
               _buildActionButtons(context),
               SizedBox(height: 30.h),
@@ -71,7 +77,11 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildStorageInfoCard(BuildContext context, bool isDark) {
+  Widget _buildStorageInfoCard(
+    BuildContext context,
+    bool isDark,
+    StorageInfo? info,
+  ) {
     return Container(
       margin: EdgeInsets.symmetric(horizontal: 20.w),
       padding: EdgeInsets.all(20.w),
@@ -101,7 +111,9 @@ class HomeScreen extends StatelessWidget {
                 ),
               ),
               Text(
-                '64 GB / 128 GB',
+                info != null
+                    ? '${info.usedSpace.toStringAsFixed(1)} GB / ${info.totalSpace.toStringAsFixed(1)} GB'
+                    : 'Loading...',
                 style: TextStyle(fontSize: 14.sp, fontWeight: FontWeight.w600),
               ),
             ],
@@ -112,7 +124,7 @@ class HomeScreen extends StatelessWidget {
             child: ClipRRect(
               borderRadius: BorderRadius.circular(10.r),
               child: LinearProgressIndicator(
-                value: 0.5,
+                value: info?.usagePercentage ?? 0,
                 minHeight: 8.h,
                 backgroundColor: Colors.grey.withOpacity(0.2),
                 valueColor: AlwaysStoppedAnimation<Color>(

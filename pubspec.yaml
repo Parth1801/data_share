@@ -62,6 +62,7 @@ dependencies:
   installed_apps: ^2.1.1
   photo_manager: ^3.9.0
   on_audio_query: ^2.9.0
+  disk_space_2: ^1.0.12
 
 dev_dependencies:
   flutter_test:
