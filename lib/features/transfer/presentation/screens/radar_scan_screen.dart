@@ -62,6 +62,8 @@ class _RadarScanScreenState extends ConsumerState<RadarScanScreen>
         ref
             .read(transferProvider.notifier)
             .startSending(selectedFiles, goAddress, isGO);
+        // Clear selection so next send starts fresh
+        ref.read(selectedFilesProvider.notifier).clearFiles();
 
         Navigator.pushReplacement(
           context,

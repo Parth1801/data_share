@@ -1,22 +1,38 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:datatransfer/features/transfer/providers/transfer_provider.dart';
+import 'package:datatransfer/features/transfer/providers/discovery_provider.dart';
+import 'package:datatransfer/features/file_selection/providers/selected_files_provider.dart';
 import 'package:datatransfer/core/models/file_item.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 class TransferProgressScreen extends ConsumerWidget {
   const TransferProgressScreen({super.key});
 
+  Future<void> _resetAndGoHome(BuildContext context, WidgetRef ref) async {
+    ref.read(transferProvider.notifier).reset();
+    ref.read(selectedFilesProvider.notifier).clearFiles();
+    await ref.read(discoveryProvider.notifier).fullReset();
+    if (context.mounted) {
+      // Pop all the way back to home
+      Navigator.of(context).popUntil((route) => route.isFirst);
+    }
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final transferState = ref.watch(transferProvider);
-    print('TransferProgressScreen: Current State - isSending: ${transferState.isSending}, Files: ${transferState.files.length}');
+    print(
+      'TransferProgressScreen: Current State - isSending: ${transferState.isSending}, Files: ${transferState.files.length}',
+    );
 
-    final String titlePrefix = transferState.isSending ? 'Sending' : 'Receiving';
-    final String statusText = transferState.isCompleted 
-        ? '$titlePrefix Complete' 
+    final String titlePrefix = transferState.isSending
+        ? 'Sending'
+        : 'Receiving';
+    final String statusText = transferState.isCompleted
+        ? '$titlePrefix Complete'
         : '$titlePrefix...';
 
     return Scaffold(
@@ -25,6 +41,10 @@ class TransferProgressScreen extends ConsumerWidget {
         title: Text(statusText),
         elevation: 0,
         backgroundColor: Colors.transparent,
+        leading: IconButton(
+          icon: const Icon(Icons.close),
+          onPressed: () => _resetAndGoHome(context, ref),
+        ),
       ),
       body: Column(
         children: [
@@ -45,29 +65,69 @@ class TransferProgressScreen extends ConsumerWidget {
             ),
           _buildTransferHeader(context, transferState, isDark, titlePrefix),
           Expanded(
-            child: transferState.files.isEmpty 
-              ? const Center(child: Text('Waiting for files...'))
-              : ListView.builder(
-                  padding: EdgeInsets.symmetric(horizontal: 20.w, vertical: 20.h),
-                  itemCount: transferState.files.length,
-                  itemBuilder: (context, index) {
-                    final file = transferState.files[index];
-                    double progress = 0.0;
-                    if (index < transferState.currentFileIndex) {
-                      progress = 1.0;
-                    } else if (index == transferState.currentFileIndex) {
-                      progress = transferState.currentFileProgress;
-                    }
-                    return _buildFileTransferItem(context, file, index, progress, isDark);
-                  },
-                ),
+            child: transferState.files.isEmpty
+                ? const Center(child: Text('Waiting for files...'))
+                : ListView.builder(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: 20.w,
+                      vertical: 20.h,
+                    ),
+                    itemCount: transferState.files.length,
+                    itemBuilder: (context, index) {
+                      final file = transferState.files[index];
+                      double progress = 0.0;
+                      if (index < transferState.currentFileIndex) {
+                        progress = 1.0;
+                      } else if (index == transferState.currentFileIndex) {
+                        progress = transferState.currentFileProgress;
+                      }
+                      return _buildFileTransferItem(
+                        context,
+                        file,
+                        index,
+                        progress,
+                        isDark,
+                      );
+                    },
+                  ),
           ),
+          // Done / Go Back button shown when transfer completes or errors
+          if (transferState.isCompleted || transferState.error != null)
+            Padding(
+              padding: EdgeInsets.fromLTRB(20.w, 0, 20.w, 30.h),
+              child: SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () => _resetAndGoHome(context, ref),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: theme.primaryColor,
+                    foregroundColor: Colors.white,
+                    padding: EdgeInsets.symmetric(vertical: 16.h),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16.r),
+                    ),
+                  ),
+                  child: Text(
+                    transferState.isCompleted ? 'Done' : 'Go Back',
+                    style: TextStyle(
+                      fontSize: 16.sp,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
   }
 
-  Widget _buildTransferHeader(BuildContext context, TransferState state, bool isDark, String prefix) {
+  Widget _buildTransferHeader(
+    BuildContext context,
+    TransferState state,
+    bool isDark,
+    String prefix,
+  ) {
     return Container(
       padding: EdgeInsets.all(25.w),
       margin: EdgeInsets.all(20.w),
@@ -194,7 +254,11 @@ class TransferProgressScreen extends ConsumerWidget {
               borderRadius: BorderRadius.circular(10.r),
             ),
             child: Icon(
-              file.type == 'Video' ? Icons.video_library : (file.type == 'Photo' ? Icons.image : Icons.insert_drive_file),
+              file.type == 'Video'
+                  ? Icons.video_library
+                  : (file.type == 'Photo'
+                        ? Icons.image
+                        : Icons.insert_drive_file),
               color: Theme.of(context).primaryColor,
             ),
           ),
@@ -219,10 +283,7 @@ class TransferProgressScreen extends ConsumerWidget {
                     ),
                     Text(
                       '${file.sizeMB.toStringAsFixed(1)} MB',
-                      style: TextStyle(
-                        fontSize: 12.sp,
-                        color: Colors.grey,
-                      ),
+                      style: TextStyle(fontSize: 12.sp, color: Colors.grey),
                     ),
                   ],
                 ),

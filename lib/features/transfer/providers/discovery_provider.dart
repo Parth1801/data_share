@@ -80,12 +80,18 @@ class DiscoveryNotifier extends StateNotifier<DiscoveryState> {
   void _triggerHandshake(WifiP2PInfo info) {
     if (_isSender) {
       _handshakeTriggered = true;
-      state = state.copyWith(handshakeRole: HandshakeRole.sending);
+      // Clear the connecting overlay when group is formed
+      state = state.copyWith(
+        handshakeRole: HandshakeRole.sending,
+        isConnecting: false,
+      );
     } else if (_isReceiver) {
-      // Wait until at least one client has connected before triggering
       if (info.isGroupOwner && info.clients.isEmpty) return;
       _handshakeTriggered = true;
-      state = state.copyWith(handshakeRole: HandshakeRole.receiving);
+      state = state.copyWith(
+        handshakeRole: HandshakeRole.receiving,
+        isConnecting: false,
+      );
     }
   }
 
@@ -106,6 +112,23 @@ class DiscoveryNotifier extends StateNotifier<DiscoveryState> {
     _isSender = false;
     _isReceiver = false;
     _handshakeTriggered = false;
+    state = DiscoveryState(devices: []);
+  }
+
+  /// Full reset — call this when returning to home screen to start fresh
+  Future<void> fullReset() async {
+    _peersSubscription?.cancel();
+    _discoveryTimer?.cancel();
+    _isSender = false;
+    _isReceiver = false;
+    _handshakeTriggered = false;
+    try {
+      await _p2p.removeGroup();
+    } catch (_) {}
+    _p2p.unregister();
+    await Future.delayed(const Duration(milliseconds: 300));
+    await _p2p.initialize();
+    await _p2p.register();
     state = DiscoveryState(devices: []);
   }
 
