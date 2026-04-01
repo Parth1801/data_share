@@ -1,12 +1,14 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter_p2p_connection/flutter_p2p_connection.dart';
-import 'package:flutter_riverpod/legacy.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:device_info_plus/device_info_plus.dart';
+import 'package:flutter_riverpod/legacy.dart';
+import 'transfer_provider.dart';
 import '../../../../core/models/device_item.dart';
 
 enum HotspotStatus { idle, initializing, active, failed }
+enum HandshakeRole { idle, sending, receiving }
 
 class DiscoveryState {
   final List<DeviceItem> devices;
@@ -15,6 +17,7 @@ class DiscoveryState {
   final bool isConnecting;
   final String? errorMessage;
   final WifiP2PInfo? connectionInfo;
+  final HandshakeRole handshakeRole;
 
   DiscoveryState({
     required this.devices,
@@ -23,6 +26,7 @@ class DiscoveryState {
     this.isConnecting = false,
     this.errorMessage,
     this.connectionInfo,
+    this.handshakeRole = HandshakeRole.idle,
   });
 
   DiscoveryState copyWith({
@@ -32,6 +36,7 @@ class DiscoveryState {
     bool? isConnecting,
     String? errorMessage,
     WifiP2PInfo? connectionInfo,
+    HandshakeRole? handshakeRole,
   }) {
     return DiscoveryState(
       devices: devices ?? this.devices,
@@ -40,18 +45,24 @@ class DiscoveryState {
       isConnecting: isConnecting ?? this.isConnecting,
       errorMessage: errorMessage ?? this.errorMessage,
       connectionInfo: connectionInfo ?? this.connectionInfo,
+      handshakeRole: handshakeRole ?? this.handshakeRole,
     );
   }
 }
 
 class DiscoveryNotifier extends StateNotifier<DiscoveryState> {
-  DiscoveryNotifier() : super(DiscoveryState(devices: [])) {
+  final dynamic _ref;
+  DiscoveryNotifier(this._ref) : super(DiscoveryState(devices: [])) {
     _init();
   }
 
   final _p2pConnection = FlutterP2pConnection();
   StreamSubscription? _infoSubscription;
   StreamSubscription? _peersSubscription;
+  Timer? _discoveryTimer;
+  bool _isSenderSessionUpdate = false;
+  bool _isReceiverSessionUpdate = false;
+  bool _protocolTriggered = false;
 
   void _init() {
     _p2pConnection.initialize();
@@ -59,9 +70,38 @@ class DiscoveryNotifier extends StateNotifier<DiscoveryState> {
 
     // Listen to connection info stream (case sensitive in 1.0.3)
     _infoSubscription = _p2pConnection.streamWifiP2PInfo().listen((info) {
-      print('WiFi P2P Connection Info Changed: ${info.isConnected}');
+      if (!mounted) return;
+      print('WiFi P2P Connection Info Changed: groupFormed=${info.groupFormed}');
       state = state.copyWith(connectionInfo: info);
+
+      if (info.groupFormed && !_protocolTriggered) {
+        _handleHandshake(info);
+      } else if (!info.groupFormed) {
+        _protocolTriggered = false;
+      }
     });
+  }
+
+  void _handleHandshake(WifiP2PInfo info) {
+    // Logic: Sender is the one who initiated Discovery (_isSenderSessionUpdate)
+    // Receiver is the one who initiated Hotspot (_isReceiverSessionUpdate)
+    // Who is GO (Group Owner) is secondary.
+    
+    if (_isSenderSessionUpdate && info.groupFormed) {
+      print('DiscoveryNotifier: Detected Connection as Initiator (Sender). Triggering protocol...');
+      _protocolTriggered = true;
+      state = state.copyWith(handshakeRole: HandshakeRole.sending);
+      
+    } else if (_isReceiverSessionUpdate && info.groupFormed) {
+      if (info.isGroupOwner && info.clients.isEmpty) {
+        print('DiscoveryNotifier: GO group formed but no clients yet. Waiting...');
+        return;
+      }
+      
+      print('DiscoveryNotifier: Detected Connection as Host (Receiver). Triggering protocol...');
+      _protocolTriggered = true;
+      state = state.copyWith(handshakeRole: HandshakeRole.receiving);
+    }
   }
 
   @override
@@ -69,6 +109,8 @@ class DiscoveryNotifier extends StateNotifier<DiscoveryState> {
     print('Disposing DiscoveryNotifier...');
     _infoSubscription?.cancel();
     _peersSubscription?.cancel();
+    _discoveryTimer?.cancel();
+    _p2pConnection.removeGroup(); // Fire and forget to clear group
     _p2pConnection.unregister();
     super.dispose();
   }
@@ -99,6 +141,7 @@ class DiscoveryNotifier extends StateNotifier<DiscoveryState> {
 
     await _peersSubscription?.cancel();
     _peersSubscription = _p2pConnection.streamPeers().listen((peers) {
+      if (!mounted) return;
       state = state.copyWith(
         devices: peers.map((peer) {
           final String deviceName = peer.deviceName;
@@ -114,29 +157,53 @@ class DiscoveryNotifier extends StateNotifier<DiscoveryState> {
 
     bool isScanning = await _p2pConnection.discover() ?? false;
     state = state.copyWith(isScanning: isScanning);
+    
+    if (isScanning) {
+      _discoveryTimer?.cancel();
+      _discoveryTimer = Timer.periodic(const Duration(seconds: 10), (_) async {
+        if (state.isScanning) {
+          print('Periodic Discovery Refresh...');
+          await _p2pConnection.discover();
+        }
+      });
+    }
     print('P2P Scanning started: $isScanning');
   }
 
   void stopScanning() {
+    print('Stopping Scanning and clearing P2P groups...');
     _peersSubscription?.cancel();
+    _discoveryTimer?.cancel();
     _p2pConnection.unregister();
+    _isSenderSessionUpdate = false;
+    _isReceiverSessionUpdate = false;
+    _protocolTriggered = false;
     state = DiscoveryState(devices: []);
   }
 
   Future<bool> startHotspotGroup() async {
-    print('Checking if hotspot can be started...');
-    state = state.copyWith(hotspotStatus: HotspotStatus.initializing);
+    print('DiscoveryNotifier: Starting Hotspot Group (Receiver Role)');
+    final currentTransfer = _ref.read(transferProvider);
+    if (!currentTransfer.isTransferring && !currentTransfer.isCompleted) {
+      _ref.read(transferProvider.notifier).reset();
+    }
+    _isReceiverSessionUpdate = true;
+    _isSenderSessionUpdate = false;
+    state = state.copyWith(hotspotStatus: HotspotStatus.initializing, handshakeRole: HandshakeRole.idle);
     await _checkAndEnableServices();
     
     await _p2pConnection.initialize();
     await _p2pConnection.register();
 
-    // Clear any existing group first
+    // Clear any existing group first and wait a bit
     try {
-      await _p2pConnection.removeGroup();
-      print('Existing groups cleared.');
+      if (state.connectionInfo?.groupFormed == true) {
+        print('DiscoveryNotifier: Group already exists. Removing...');
+        await _p2pConnection.removeGroup();
+        await Future.delayed(const Duration(milliseconds: 800)); 
+      }
     } catch (e) {
-      print('None or error removing group: $e');
+      print('DiscoveryNotifier: Error clearing existing group: $e');
     }
 
     final locStatus = await Permission.location.request();
@@ -177,8 +244,14 @@ class DiscoveryNotifier extends StateNotifier<DiscoveryState> {
   }
 
   void discoverPeers() async {
-    print('Starting Discovery...');
-    state = state.copyWith(isScanning: true);
+    print('DiscoveryNotifier: Starting Discovery (Sender Role)');
+    final currentTransfer = _ref.read(transferProvider);
+    if (!currentTransfer.isTransferring && !currentTransfer.isCompleted) {
+      _ref.read(transferProvider.notifier).reset();
+    }
+    _isSenderSessionUpdate = true;
+    _isReceiverSessionUpdate = false;
+    state = state.copyWith(isScanning: true, handshakeRole: HandshakeRole.idle);
     await _checkAndEnableServices();
     print('Services enabled/checked.');
 
@@ -199,6 +272,7 @@ class DiscoveryNotifier extends StateNotifier<DiscoveryState> {
 
     await _peersSubscription?.cancel();
     _peersSubscription = _p2pConnection.streamPeers().listen((peers) {
+      if (!mounted) return;
       print('Discovery result - Peers found: ${peers.length}');
       for (var p in peers) {
         print(' - Found peer: ${p.deviceName} (${p.deviceAddress})');
@@ -217,6 +291,15 @@ class DiscoveryNotifier extends StateNotifier<DiscoveryState> {
     try {
       bool isScanning = await _p2pConnection.discover() ?? false;
       state = state.copyWith(isScanning: isScanning);
+      if (isScanning) {
+        _discoveryTimer?.cancel();
+        _discoveryTimer = Timer.periodic(const Duration(seconds: 10), (_) async {
+          if (state.isScanning) {
+            print('Periodic Peer Refresh...');
+            await _p2pConnection.discover();
+          }
+        });
+      }
       print('discover() result: $isScanning');
     } catch (e) {
       print('Error starting discovery: $e');
@@ -231,7 +314,11 @@ class DiscoveryNotifier extends StateNotifier<DiscoveryState> {
       bool success = await _p2pConnection.connect(deviceAddress) ?? false;
       print('Connect request result: $success');
       if (!success) {
-        state = state.copyWith(isConnecting: false, errorMessage: 'Connection request failed');
+        state = state.copyWith(
+          isConnecting: false, 
+          errorMessage: 'Connection request failed',
+          devices: state.devices.where((d) => d.id != deviceAddress).toList(),
+        );
       }
       return success;
     } catch (e) {
@@ -244,6 +331,6 @@ class DiscoveryNotifier extends StateNotifier<DiscoveryState> {
 
 final discoveryProvider = StateNotifierProvider.autoDispose<DiscoveryNotifier, DiscoveryState>(
   (ref) {
-    return DiscoveryNotifier();
+    return DiscoveryNotifier(ref);
   },
 );

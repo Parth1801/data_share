@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:datatransfer/features/file_selection/providers/selected_files_provider.dart';
 import 'package:datatransfer/features/transfer/providers/discovery_provider.dart';
 import 'package:datatransfer/features/transfer/providers/transfer_provider.dart';
@@ -17,7 +18,8 @@ class RadarScanScreen extends ConsumerStatefulWidget {
 class _RadarScanScreenState extends ConsumerState<RadarScanScreen>
     with SingleTickerProviderStateMixin {
   late AnimationController _controller;
-  bool _protocolStarted = false;
+  bool _navigated = false;
+  Timer? _protocolTimer;
 
   @override
   void initState() {
@@ -36,6 +38,7 @@ class _RadarScanScreenState extends ConsumerState<RadarScanScreen>
   @override
   void dispose() {
     _controller.dispose();
+    _protocolTimer?.cancel();
     super.dispose();
   }
 
@@ -44,42 +47,25 @@ class _RadarScanScreenState extends ConsumerState<RadarScanScreen>
     final theme = Theme.of(context);
     final discoveryState = ref.watch(discoveryProvider);
     final hotspotStatus = discoveryState.hotspotStatus;
-    final isConnected = discoveryState.connectionInfo?.isConnected ?? false;
+    final isConnected = discoveryState.connectionInfo?.groupFormed ?? false;
 
-    // Listen for discovery status
-    ref.listen(discoveryProvider.select((s) => s.devices), (previous, next) {
-      if (next.isNotEmpty && (previous?.isEmpty ?? true)) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Found ${next.length} potential receivers!')),
+    ref.listen(discoveryProvider.select((s) => s.handshakeRole), (previous, next) {
+      if (mounted && next == HandshakeRole.sending && !_navigated) {
+        _navigated = true;
+        
+        final selectedFiles = ref.read(selectedFilesProvider);
+        final info = ref.read(discoveryProvider).connectionInfo;
+        final targetAddress = info?.groupOwnerAddress ?? "192.168.49.1";
+        final isGO = info?.isGroupOwner ?? false;
+        
+        print('RadarScanScreen: Handshake detected. Starting Transfer as Sender.');
+        ref.read(transferProvider.notifier).startSending(selectedFiles, targetAddress, isGO);
+        
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => const TransferProgressScreen()),
         );
       }
-    });
-
-    // Listen for connection (Sender side now acts as Client)
-    ref.listen(discoveryProvider.select((s) => s.connectionInfo), (previous, next) {
-      if (next?.isConnected == true && next?.isGroupOwner == false && !_protocolStarted) {
-        _protocolStarted = true;
-          
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Connected to receiver! Syncing...')),
-          );
-          
-          final transferNotifier = ref.read(transferProvider.notifier);
-          final selectedFiles = ref.read(selectedFilesProvider);
-          
-          Future.delayed(const Duration(seconds: 1), () {
-            if (mounted) {
-              // As Client, the GO address is the receiver's IP (usually 192.168.49.1)
-              final targetAddress = next!.groupOwnerAddress ?? "192.168.49.1";
-              transferNotifier.startSending(selectedFiles, targetAddress, next.isGroupOwner);
-              
-              Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(builder: (context) => const TransferProgressScreen()),
-              );
-            }
-          });
-        }
     });
 
     return Scaffold(
@@ -201,27 +187,7 @@ class _RadarScanScreenState extends ConsumerState<RadarScanScreen>
                     color: Colors.grey,
                   ),
                 ),
-                if (isConnected) ...[
-                  SizedBox(height: 20.h),
-                  ElevatedButton.icon(
-                    onPressed: () {
-                      final selectedFiles = ref.read(selectedFilesProvider);
-                      final goAddress = discoveryState.connectionInfo?.groupOwnerAddress ?? "192.168.49.1";
-                      final isGO = discoveryState.connectionInfo?.isGroupOwner ?? false;
-                      ref.read(transferProvider.notifier).startSending(selectedFiles, goAddress, isGO);
-                      Navigator.pushReplacement(
-                        context,
-                        MaterialPageRoute(builder: (context) => const TransferProgressScreen()),
-                      );
-                    },
-                    icon: const Icon(Icons.send),
-                    label: const Text('Start Transfer Now'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
-                      foregroundColor: Colors.white,
-                    ),
-                  ),
-                ],
+                // Remove manual "Start Transfer Now" button as it causes duplicate navigation
                 if (hotspotStatus == HotspotStatus.failed || hotspotStatus == HotspotStatus.idle) ...[
                   SizedBox(height: 20.h),
                   ElevatedButton.icon(

@@ -12,6 +12,7 @@ class TransferProgressScreen extends ConsumerWidget {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final transferState = ref.watch(transferProvider);
+    print('TransferProgressScreen: Current State - isSending: ${transferState.isSending}, Files: ${transferState.files.length}');
 
     final String titlePrefix = transferState.isSending ? 'Sending' : 'Receiving';
     final String statusText = transferState.isCompleted 
@@ -202,14 +203,28 @@ class TransferProgressScreen extends ConsumerWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  file.name,
-                  style: TextStyle(
-                    fontSize: 14.sp,
-                    fontWeight: FontWeight.w600,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        file.name,
+                        style: TextStyle(
+                          fontSize: 14.sp,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    Text(
+                      '${file.sizeMB.toStringAsFixed(1)} MB',
+                      style: TextStyle(
+                        fontSize: 12.sp,
+                        color: Colors.grey,
+                      ),
+                    ),
+                  ],
                 ),
                 SizedBox(height: 5.h),
                 Row(

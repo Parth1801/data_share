@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'dart:math' as math;
@@ -18,7 +19,8 @@ class ReceiveScreen extends ConsumerStatefulWidget {
 class _ReceiveScreenState extends ConsumerState<ReceiveScreen> 
     with SingleTickerProviderStateMixin {
   late AnimationController _controller;
-  bool _protocolStarted = false;
+  bool _navigated = false;
+  Timer? _protocolTimer;
   // We use discoveryProvider instead of a local _host instance
 
   @override
@@ -53,6 +55,7 @@ class _ReceiveScreenState extends ConsumerState<ReceiveScreen>
   @override
   void dispose() {
     _controller.dispose();
+    _protocolTimer?.cancel();
     ref.read(discoveryProvider.notifier).stopScanning();
     super.dispose();
   }
@@ -61,35 +64,23 @@ class _ReceiveScreenState extends ConsumerState<ReceiveScreen>
   Widget build(BuildContext context) {
     final discoveryState = ref.watch(discoveryProvider);
 
-    // Listen for discovery status
-    ref.listen(discoveryProvider.select((s) => s.devices), (previous, next) {
-      if (next.isNotEmpty && (previous?.isEmpty ?? true)) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Found ${next.length} potential senders!')),
-        );
-      }
-    });
+    // Handshake listener moved to handshakeRole below
 
-    // Listen for connection (Receiver side now acts as Group Owner)
-    ref.listen(discoveryProvider.select((s) => s.connectionInfo), (previous, next) {
-      if (next?.isConnected == true && next?.isGroupOwner == true && next!.clients.isNotEmpty && !_protocolStarted) {
-        _protocolStarted = true;
-        print('Client connected to Receiver Hotspot! Starting protocol...');
+    ref.listen(discoveryProvider.select((s) => s.handshakeRole), (previous, next) {
+      if (mounted && next == HandshakeRole.receiving && !_navigated) {
+        _navigated = true;
         
-        final transferNotifier = ref.read(transferProvider.notifier);
+        final info = ref.read(discoveryProvider).connectionInfo;
+        final myAddress = info?.groupOwnerAddress ?? "192.168.49.1";
+        final isGO = info?.isGroupOwner ?? true;
         
-        Future.delayed(const Duration(milliseconds: 1000), () {
-          if (mounted) {
-            // As GO, we bind to our own address (usually 192.168.49.1)
-            final myAddress = next.groupOwnerAddress ?? "192.168.49.1";
-            transferNotifier.startReceiving(myAddress, next.isGroupOwner);
-            
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (context) => const TransferProgressScreen()),
-            );
-          }
-        });
+        print('ReceiveScreen: Handshake detected. Starting Transfer as Receiver.');
+        ref.read(transferProvider.notifier).startReceiving(myAddress, isGO);
+        
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => const TransferProgressScreen()),
+        );
       }
     });
 
@@ -106,15 +97,51 @@ class _ReceiveScreenState extends ConsumerState<ReceiveScreen>
               children: [
                 SizedBox(height: 50.h),
                 Text(
-                  'Waiting for Sender',
-                  style: TextStyle(fontSize: 18.sp, fontWeight: FontWeight.bold, color: Colors.green),
+                  discoveryState.hotspotStatus == HotspotStatus.active 
+                      ? 'Radar Active' 
+                      : (discoveryState.hotspotStatus == HotspotStatus.initializing 
+                          ? 'Starting Radar...' 
+                          : (discoveryState.hotspotStatus == HotspotStatus.failed ? 'Radar Failed' : 'Radar Offline')),
+                  style: TextStyle(
+                    fontSize: 20.sp, 
+                    fontWeight: FontWeight.bold, 
+                    color: discoveryState.hotspotStatus == HotspotStatus.active 
+                        ? Colors.green 
+                        : (discoveryState.hotspotStatus == HotspotStatus.failed ? Colors.red : Colors.orange),
+                  ),
                 ),
-                SizedBox(height: 10.h),
-                Text(
-                  'Your hotspot is active. Tell the sender to find you on their radar.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 12.sp, color: Colors.grey),
+                SizedBox(height: 12.h),
+                Container(
+                  padding: EdgeInsets.symmetric(horizontal: 16.w, vertical: 8.h),
+                  decoration: BoxDecoration(
+                    color: (discoveryState.hotspotStatus == HotspotStatus.active ? Colors.green : Colors.orange).withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(20.r),
+                    border: Border.all(
+                      color: (discoveryState.hotspotStatus == HotspotStatus.active ? Colors.green : Colors.orange).withOpacity(0.3),
+                    ),
+                  ),
+                  child: Text(
+                    discoveryState.hotspotStatus == HotspotStatus.active 
+                        ? 'Ready for connection (Invisible to System)' 
+                        : (discoveryState.hotspotStatus == HotspotStatus.initializing ? 'Configuring P2P Network...' : 'Tap to try again'),
+                    style: TextStyle(
+                      fontSize: 12.sp, 
+                      color: discoveryState.hotspotStatus == HotspotStatus.active ? Colors.green : Colors.orange,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
                 ),
+                if (discoveryState.hotspotStatus == HotspotStatus.failed || discoveryState.hotspotStatus == HotspotStatus.idle)
+                  ElevatedButton.icon(
+                    onPressed: () => ref.read(discoveryProvider.notifier).startHotspotGroup(),
+                    icon: Icon(Icons.radar, color: Colors.white),
+                    label: Text(discoveryState.hotspotStatus == HotspotStatus.failed ? 'Retry Radar' : 'Start Radar'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: discoveryState.hotspotStatus == HotspotStatus.failed ? Colors.red : Colors.green,
+                      foregroundColor: Colors.white,
+                      padding: EdgeInsets.symmetric(horizontal: 24.w, vertical: 12.h),
+                    ),
+                  ),
                 SizedBox(height: 20.h),
                 
                 // Radar Section
