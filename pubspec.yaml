@@ -63,6 +63,7 @@ dependencies:
   photo_manager: ^3.9.0
   on_audio_query: ^2.9.0
   disk_space_2: ^1.0.12
+  open_filex: ^4.7.0
 
 dev_dependencies:
   flutter_test:

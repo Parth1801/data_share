@@ -5,6 +5,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_p2p_connection/flutter_p2p_connection.dart';
 import 'package:flutter_riverpod/legacy.dart';
 import '../../../../core/models/file_item.dart';
+import '../../home/models/history_item.dart';
+import '../../home/providers/history_provider.dart';
 
 class TransferState {
   final List<FileItem> files;
@@ -60,7 +62,8 @@ class TransferState {
 //   RECEIVER → SENDER: JSON {"type":"progress","overall":0.5,"current":0,"speed":1.2}
 
 class TransferNotifier extends StateNotifier<TransferState> {
-  TransferNotifier() : super(TransferState(files: []));
+  final dynamic _ref;
+  TransferNotifier(this._ref) : super(TransferState(files: []));
 
   final _p2p = FlutterP2pConnection();
   static const String _goIp = '192.168.49.1';
@@ -215,6 +218,17 @@ class TransferNotifier extends StateNotifier<TransferState> {
 
       _p2p.sendStringToSocket(jsonEncode({'type': 'done', 'index': i}));
 
+      // Save to history
+      _ref.read(historyProvider.notifier).addHistoryItem(HistoryItem(
+        id: item.id,
+        name: item.name,
+        path: item.path,
+        sizeMB: item.sizeMB,
+        type: item.type,
+        timestamp: DateTime.now(),
+        isSent: true,
+      ));
+
       if (mounted) {
         state = state.copyWith(
           currentFileIndex: i,
@@ -330,6 +344,18 @@ class TransferNotifier extends StateNotifier<TransferState> {
         // Notify Android MediaStore so the file appears in gallery immediately
         _notifyMediaStore(filePath);
 
+        // Save to history
+        final savedFile = _rxFiles[idx];
+        _ref.read(historyProvider.notifier).addHistoryItem(HistoryItem(
+          id: savedFile.id,
+          name: savedFile.name,
+          path: savedFile.path,
+          sizeMB: savedFile.sizeMB,
+          type: savedFile.type,
+          timestamp: DateTime.now(),
+          isSent: false,
+        ));
+
         if (mounted) {
           state = state.copyWith(
             currentFileIndex: idx,
@@ -398,5 +424,5 @@ class TransferNotifier extends StateNotifier<TransferState> {
 }
 
 final transferProvider = StateNotifierProvider<TransferNotifier, TransferState>(
-  (ref) => TransferNotifier(),
+  (ref) => TransferNotifier(ref),
 );

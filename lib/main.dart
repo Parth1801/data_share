@@ -3,12 +3,14 @@ import 'package:datatransfer/core/services/shared_prefs_service.dart';
 import 'package:datatransfer/core/theme/app_theme.dart';
 import 'package:datatransfer/core/theme/theme_provider/providers/theme_provider.dart';
 import 'package:flutter/material.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'features/home/presentation/screens/main_navigation_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await Hive.initFlutter();
   await SharedPrefsService().init();
   final isDarkMode = SharedPrefsService().isDarkMode;
   runApp(

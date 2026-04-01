@@ -8,6 +8,8 @@ import 'package:on_audio_query/on_audio_query.dart';
 import 'package:datatransfer/core/models/file_item.dart';
 import '../../providers/device_files_provider.dart';
 import '../../providers/selected_files_provider.dart';
+import '../../../../features/home/providers/history_provider.dart';
+import 'package:open_filex/open_filex.dart';
 import 'dart:typed_data';
 
 class FileListTab extends ConsumerWidget {
@@ -51,8 +53,73 @@ class FileListTab extends ConsumerWidget {
           (data) => _buildFilesList(context, ref, data),
         );
       case 'History':
+        final history = ref.watch(historyProvider);
+        if (history.isEmpty) {
+          return const Center(child: Text('No transfer history yet'));
+        }
+        return _buildHistoryList(context, ref, history);
       default:
-        return const Center(child: Text('History implementation coming soon'));
+        return const Center(child: Text('Coming soon'));
+    }
+  }
+
+  Widget _buildHistoryList(
+    BuildContext context,
+    WidgetRef ref,
+    List<dynamic> history,
+  ) {
+    return ListView.builder(
+      padding: EdgeInsets.only(bottom: 100.h),
+      itemCount: history.length,
+      itemBuilder: (context, index) {
+        final item = history[index];
+
+        return ListTile(
+          leading: Icon(
+            _getHistoryIcon(item.type),
+            size: 40.w,
+            color: Theme.of(context).primaryColor,
+          ),
+          title: Text(
+            item.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 16.sp, fontWeight: FontWeight.w500),
+          ),
+          subtitle: Text(
+            '${item.sizeMB.toStringAsFixed(2)} MB • ${item.isSent ? 'Sent' : 'Received'}',
+            style: TextStyle(fontSize: 12.sp, color: Colors.grey),
+          ),
+          onTap: () async {
+            if (item.path.isNotEmpty) {
+              await OpenFilex.open(item.path);
+            }
+          },
+          trailing: IconButton(
+            icon: const Icon(Icons.info_outline),
+            onPressed: () {
+              // Show file details or options
+            },
+          ),
+        );
+      },
+    );
+  }
+
+  IconData _getHistoryIcon(String type) {
+    switch (type.toLowerCase()) {
+      case 'photo':
+      case 'image':
+        return Icons.image;
+      case 'video':
+        return Icons.videocam;
+      case 'audio':
+      case 'music':
+        return Icons.audiotrack;
+      case 'app':
+        return Icons.android;
+      default:
+        return Icons.insert_drive_file;
     }
   }
 

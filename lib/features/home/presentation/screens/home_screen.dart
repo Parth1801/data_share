@@ -1,9 +1,11 @@
 import 'package:datatransfer/features/file_selection/presentation/screens/file_selection_screen.dart';
+import 'package:datatransfer/features/home/providers/history_provider.dart';
 import 'package:datatransfer/features/home/providers/storage_provider.dart';
 import 'package:datatransfer/features/transfer/presentation/screens/receive_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
+import 'package:open_filex/open_filex.dart';
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
@@ -13,6 +15,7 @@ class HomeScreen extends ConsumerWidget {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final storageInfo = ref.watch(storageProvider);
+    final history = ref.watch(historyProvider);
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
@@ -30,7 +33,7 @@ class HomeScreen extends ConsumerWidget {
               SizedBox(height: 30.h),
               _buildActionButtons(context),
               SizedBox(height: 30.h),
-              _buildRecentFiles(context, isDark),
+              _buildRecentFiles(context, isDark, history),
             ],
           ),
         ),
@@ -240,7 +243,11 @@ class HomeScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildRecentFiles(BuildContext context, bool isDark) {
+  Widget _buildRecentFiles(
+    BuildContext context,
+    bool isDark,
+    List<dynamic> history,
+  ) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -253,55 +260,105 @@ class HomeScreen extends ConsumerWidget {
                 'Recent Files',
                 style: TextStyle(fontSize: 18.sp, fontWeight: FontWeight.bold),
               ),
-              Text(
-                'View All',
-                style: TextStyle(
-                  fontSize: 14.sp,
-                  color: Theme.of(context).primaryColor,
-                  fontWeight: FontWeight.w600,
+              if (history.isNotEmpty)
+                Text(
+                  'View All',
+                  style: TextStyle(
+                    fontSize: 14.sp,
+                    color: Theme.of(context).primaryColor,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
-              ),
             ],
           ),
         ),
         SizedBox(height: 15.h),
-        SizedBox(
-          height: 100.h,
-          child: ListView.builder(
-            scrollDirection: Axis.horizontal,
-            padding: EdgeInsets.symmetric(horizontal: 15.w),
-            itemCount: 5,
-            itemBuilder: (context, index) {
-              return Container(
-                width: 80.w,
-                margin: EdgeInsets.symmetric(horizontal: 5.w),
-                decoration: BoxDecoration(
-                  color: isDark
-                      ? const Color(0xFF1E1E1E)
-                      : Colors.grey.shade100,
-                  borderRadius: BorderRadius.circular(16.r),
-                ),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      index % 2 == 0 ? Icons.image : Icons.insert_drive_file,
-                      size: 32.sp,
-                      color: index % 2 == 0 ? Colors.orange : Colors.blue,
+        if (history.isEmpty)
+          Padding(
+            padding: EdgeInsets.symmetric(horizontal: 20.w),
+            child: Text(
+              'No recent transfers',
+              style: TextStyle(fontSize: 14.sp, color: Colors.grey),
+            ),
+          )
+        else
+          SizedBox(
+            height: 100.h,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              padding: EdgeInsets.symmetric(horizontal: 15.w),
+              itemCount: history.length,
+              itemBuilder: (context, index) {
+                final item = history[index];
+                return GestureDetector(
+                  onTap: () async {
+                    if (item.path.isNotEmpty) {
+                      await OpenFilex.open(item.path);
+                    }
+                  },
+                  child: Container(
+                    width: 100.w,
+                    margin: EdgeInsets.symmetric(horizontal: 5.w),
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF1E1E1E) : Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(16.r),
                     ),
-                    SizedBox(height: 8.h),
-                    Text(
-                      'File ${index + 1}',
-                      style: TextStyle(fontSize: 12.sp, color: Colors.grey),
-                      overflow: TextOverflow.ellipsis,
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          _getIconForType(item.type),
+                          size: 32.sp,
+                          color: _getColorForType(item.type),
+                        ),
+                        SizedBox(height: 8.h),
+                        Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 8.w),
+                          child: Text(
+                            item.name,
+                            style: TextStyle(fontSize: 12.sp, color: isDark ? Colors.white70 : Colors.grey.shade800),
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-              );
-            },
+                  ),
+                );
+              },
+            ),
           ),
-        ),
       ],
     );
+  }
+
+  IconData _getIconForType(String type) {
+    switch (type.toLowerCase()) {
+      case 'photo':
+      case 'image':
+        return Icons.image;
+      case 'video':
+        return Icons.videocam;
+      case 'audio':
+      case 'music':
+        return Icons.audiotrack;
+      default:
+        return Icons.insert_drive_file;
+    }
+  }
+
+  Color _getColorForType(String type) {
+    switch (type.toLowerCase()) {
+      case 'photo':
+      case 'image':
+        return Colors.orange;
+      case 'video':
+        return Colors.redAccent;
+      case 'audio':
+      case 'music':
+        return Colors.blue;
+      default:
+        return Colors.green;
+    }
   }
 }
