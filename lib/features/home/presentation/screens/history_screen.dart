@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:open_filex/open_filex.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../../providers/history_provider.dart';
 
 class HistoryScreen extends ConsumerWidget {
@@ -87,7 +88,18 @@ class HistoryScreen extends ConsumerWidget {
                   ),
                   onTap: () async {
                     if (item.path.isNotEmpty) {
-                      await OpenFilex.open(item.path);
+                      if (item.path.toLowerCase().endsWith('.apk') || item.type.toLowerCase() == 'app') {
+                        final status = await Permission.requestInstallPackages.request();
+                        if (status.isGranted) {
+                          await OpenFilex.open(item.path);
+                        } else if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Installation permission denied.')),
+                          );
+                        }
+                      } else {
+                        await OpenFilex.open(item.path);
+                      }
                     }
                   },
                   trailing: Icon(

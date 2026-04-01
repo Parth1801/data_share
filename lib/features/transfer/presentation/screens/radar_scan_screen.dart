@@ -40,7 +40,8 @@ class _RadarScanScreenState extends ConsumerState<RadarScanScreen>
     _controller.dispose();
     _protocolTimer?.cancel();
     if (!_navigated) {
-      ref.read(discoveryProvider.notifier).stopScanning();
+      // Use fullReset to ensure groups are cleared if user leaves early
+      ref.read(discoveryProvider.notifier).fullReset();
     }
     super.dispose();
   }
@@ -154,9 +155,13 @@ class _RadarScanScreenState extends ConsumerState<RadarScanScreen>
                           left: 175.w + radius * math.cos(angle) - 25.w,
                           top: 175.w + radius * math.sin(angle) - 25.w,
                           child: GestureDetector(
-                            onTap: () => ref
-                                .read(discoveryProvider.notifier)
-                                .connectToPeer(device.id),
+                          onTap: () {
+                            if (!discoveryState.isConnecting) {
+                              ref
+                                  .read(discoveryProvider.notifier)
+                                  .connectToPeer(device.id);
+                            }
+                          },
                             child: _buildDeviceIcon(
                               device.name,
                               theme.primaryColor,

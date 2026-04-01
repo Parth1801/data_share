@@ -62,7 +62,8 @@ class _ReceiveScreenState extends ConsumerState<ReceiveScreen>
     _protocolTimer?.cancel();
     // Only stop scanning if we haven't navigated to transfer — stopping kills the P2P connection
     if (!_navigated) {
-      ref.read(discoveryProvider.notifier).stopScanning();
+      // Use fullReset to ensure groups are cleared if user leaves early
+      ref.read(discoveryProvider.notifier).fullReset();
     }
     super.dispose();
   }

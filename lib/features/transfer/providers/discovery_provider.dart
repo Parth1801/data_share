@@ -78,17 +78,22 @@ class DiscoveryNotifier extends StateNotifier<DiscoveryState> {
   }
 
   void _triggerHandshake(WifiP2PInfo info) {
-    // Only trigger if we have explicitly entered a role AND a group is formed
-    if (!info.groupFormed) return;
+    // Only trigger if a group is formed AND we are explicitly in a role
+    if (!info.groupFormed) {
+      _handshakeTriggered = false;
+      return;
+    }
     
-    if (_isSender && !_handshakeTriggered) {
+    if (_handshakeTriggered) return;
+
+    if (_isSender) {
       _handshakeTriggered = true;
       state = state.copyWith(
         handshakeRole: HandshakeRole.sending,
         isConnecting: false,
       );
-    } else if (_isReceiver && !_handshakeTriggered) {
-      // Receiver needs at least one client to be present if it's the GO
+    } else if (_isReceiver) {
+      // Receiver (GO) needs at least one client to be present before handshake
       if (info.isGroupOwner && info.clients.isEmpty) return;
       
       _handshakeTriggered = true;
@@ -126,13 +131,25 @@ class DiscoveryNotifier extends StateNotifier<DiscoveryState> {
     _isSender = false;
     _isReceiver = false;
     _handshakeTriggered = false;
+    
+    state = state.copyWith(
+      devices: [],
+      isScanning: false,
+      isConnecting: false,
+      handshakeRole: HandshakeRole.idle,
+    );
+
     try {
       await _p2p.removeGroup();
+      await Future.delayed(const Duration(milliseconds: 500));
     } catch (_) {}
+    
     _p2p.unregister();
-    await Future.delayed(const Duration(milliseconds: 300));
+    await Future.delayed(const Duration(milliseconds: 200));
     await _p2p.initialize();
     await _p2p.register();
+    
+    // Final state reset
     state = DiscoveryState(devices: []);
   }
 
